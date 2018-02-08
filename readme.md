@@ -1,6 +1,6 @@
-# Grompy: Groundwater flow and solute transport models in Python
+# Grompy: Groundwater flow and solute transport modeling in Python
 
-Grompy is a 2D cross-sectional model of coupled density-driven groundwater flow and solute transport. The groundwater flow and solute transport PDEs are solved by an external finite element model code [Escript/Finley](https://launchpad.net/escript-finley). The exchange between groundwater and baseflow/evapotranspiration simulated using a seepage algorithm. Grompy includes support for automated running of a series of model experiments using parallel computing.
+Grompy is a 2D cross-sectional model of coupled density-driven groundwater flow and solute transport. The groundwater flow and solute transport euqations are solved by an external finite element model code [Escript/Finley](https://launchpad.net/escript-finley). The exchange between groundwater and baseflow/evapotranspiration simulated using a seepage algorithm. Grompy includes support for automated runs of series of model experiments using parallel computing.
 
 ## Getting Started
 
@@ -33,8 +33,8 @@ Grompy was tested on Ubuntu linux versions 14.04 and 16.04, and escript versions
 ./run-escript grompy_directory/grompy.py model_input/model_parameters.py
 ```
 
-* `grompy_directory` is the directory where you have saved Grompy. Grompy will now simulate groundwater flow and coastal groundwater discharge using input parameters stored in the file `model_parameters_median_case.py` in the model_input directory.
-* Alternatively you can also run Grompy directly from the same directory where Grompy is located by typing `python grompy.py model_input/model_parameters.py`. However for this to work you first need to add a number of variables to your .bashrc or profile file. Go to the escript/bin directory and type `./run-escript -v` to get a list of the PATH, LD_LIBRARY_PATH, PYTHONPATH and ESCRIPT_NUM_THREADS, and copy-paste them to you barshrc file. Then restart your terminal and you should now be able to run Grompy directly without using `run-escript`.
+* `grompy_directory` is the directory where you have saved Grompy. Grompy will now simulate groundwater flow and coastal groundwater discharge using input parameters stored in the file `model_parameters.py` in the model_input directory.
+* Alternatively you can also run Grompy directly from the same directory where Grompy is located by typing `python grompy.py model_input/model_parameters.py`. However for this to work you first need to add a number of variables to your .bashrc or profile file. Go to the escript/bin directory and type `./run-escript -v` to get a list of the items that you have to add (PATH, LD_LIBRARY_PATH, PYTHONPATH and ESCRIPT_NUM_THREADS), and copy-paste them to you barshrc file. After restarting your terminal and you should now be able to run Grompy directly without using `run-escript`.
 
 
 ## Model input 
@@ -45,14 +45,18 @@ The model parameter files can be edited using a text editor or to make life easi
 The model parameter file is subdivided in three classes: 
 * The first class `ModelOptions` contains a series of options for model runs, which control for example what output files should be generated, where output files should be saved, which processes to model, which solver to use. 
 * `ModelParameters` contains all physical parameters that the fluid flow and solute transport model needs. 
-* `ParameterRanges` contains values of parameters that you would like to be varied in series of model runs to test model sensitivity or explore parameters space. You can use any parameter here that is included in the `ModelParameters` class, by simply copying this parameter anywhere into the `ParameterRanges` class and adding `_s` to the parameter name. The range of parameters to be tested can be specified using a python list or numpy array. For instance to test three values of permeability, which is the parameter `k` add this line to the `ParameterRanges` class: `k_s = [10**-13.0, 10**-12.0, 10**-11.0]`. This will run three models using permeability values of 10<sup>-13</sup>, 10<sup>-12</sup>, 10<sup>-11</sup> m<sup>2</sup>, respectively. If you specify ranges for multiple parameters, the parameter `model_scenario_list = 'sensitivity'` results in a series of model runs with one parameter varied at a time, whereas `model_scenario_list = 'combinations'` will generate model runs that cover all parameter combinations.
+* `ParameterRanges` contains values of parameters that you would like to vary in series of model runs to test model sensitivity or explore parameters space. You can use any parameter here that is included in the `ModelParameters` class, by simply copying this parameter anywhere into the `ParameterRanges` class and adding `_s` to the parameter name. The range of parameters to be tested can be specified using a python list or numpy array. For instance to test three values of permeability, which is the parameter `k` add this line to the `ParameterRanges` class: `k_s = [10**-13.0, 10**-12.0, 10**-11.0]`. This will run three models using permeability values of 10<sup>-13</sup>, 10<sup>-12</sup>, 10<sup>-11</sup> m<sup>2</sup>, respectively. If you specify ranges for multiple parameters, the parameter `model_scenario_list = 'sensitivity'` results in a series of model runs with one parameter varied at a time, whereas `model_scenario_list = 'combinations'` will generate model runs that cover all parameter combinations.
 
 ## Running multiple models simultaneously
-Instead of running single model runs sequentially, you can use ``grompy_parallel.py`` for running multiple models simultaneously. You can use this in the same way as you would start `grompy.py`. The number of simultaneous model runs is controlled by the parameter `max_proc` in the model parameters file. Note that each single model run will still use the number of cores specified by run-escript (using the -t argument, see the escript documentation), or the OMP_NUM_THREADS setting in your .bashrc or profile file. For example add the following line to your bashrc file if you want grompy to use 10 threads for each model run add export OMP_NUM_THREADS=10. If you then set `max_proc = 4` and run grompy_parallel.py, 4 model runs will be executed simultaneously that each use 10 cores. grompy_parallel will start a new run once a run has finished until the entire set of model sensitivity or model parameter combination runs are done. For example
+Instead of running single model runs sequentially, you can use ``grompy_parallel.py`` for running multiple models simultaneously. You can use this in the same way as you would start `grompy.py`, by typing the following command: 
+
 ~~~sh
 $ python grompy_parallel.py model_parameters_sensitivity.py
 ~~~
-Will automatically run all model experiments specified in the model_parameters_sensitivity.py file.
+
+This will automatically run all model experiments specified in the model_parameters_sensitivity.py file.
+
+The number of simultaneous model runs is controlled by the parameter `max_proc` in the model parameters file. Note that each single model run will still use the number of cores specified by run-escript (using the -t argument, see the escript documentation), or the OMP_NUM_THREADS setting in your .bashrc or profile file. For example add the following line to your bashrc file if you want grompy to use 10 threads for each model run add export OMP_NUM_THREADS=10. If you then set `max_proc = 4` and run grompy_parallel.py, 4 model runs will be executed simultaneously that each use 10 cores. grompy_parallel will start a new run once a run has finished until the entire set of model sensitivity or model parameter combination runs are done.
 
 
 ## Model output
@@ -61,12 +65,12 @@ Will automatically run all model experiments specified in the model_parameters_s
 The mesh and variables are saved as VTK files. The VTK files are saved at a location that you can specify by setting the parameter `model_output_dir` in the model parameter file. VTK files can be used by applications such as [Paraview](https://www.paraview.org) or [Mayavi](http://docs.enthought.com/mayavi/mayavi/) to visualize model results.
 
 ### Figures
-In addition, Grompy contains a separate python script, ``make_model_fig.py``, to make figures of the model output. To run this file, open a terminal, navigate to the Grompy directory and run the command `python make_2d_model_fig.py vtk_file`, where `vtk_file` is the path to the VTK file that you would like to make a figure of. If you do not provide a VTK filename and simply run `python make_2d_model_fig.py` the script will look for VTK files in the directory `model_output` and will ask you which subdirectory and which vtk files you want select. Any figures created by this script are saved to new subdirectory `fig` that is placed in the directory that contains the VTK file. 
+In addition, Grompy contains a separate python script, ``make_model_fig.py``, to make figures of the model output. To run this file, open a terminal, navigate to the Grompy directory and run the command `python make_model_fig.py vtk_file`, where `vtk_file` is the path to the VTK file that you would like to make a figure of. If you do not provide a VTK filename and simply run `python make_2d_model_fig.py` the script will look for VTK files in the directory `model_output` and will ask you which subdirectory and which vtk files you want select. Any figures created by this script are saved to new subdirectory `fig` that is placed in the directory that contains the VTK file. 
 
 ### Text/CSV files
 For each model run input and output data are stored in a .csv file that can be opened with any spreadsheet program or text editor. The filename is `final_model_results_name_date.csv` where name is the model name that you specified in the `scenario_name` parameter in the parameter file and date is a string of the current date. This file contains a copy of each input parameter in the `ModelParameters` class, including the changes made for the parameters that are located in the `ParameterRanges` class for automated multiple model runs. In addition, this file contains a number of other columns with information on the runtime, model convergence, modeled solute concentrations, pressure and fluxes, and some information on the fluxes over the land or sea boundary. Note that the reported boundary fluxes may not be correct for models with an inclined top surface. 
 
-For a more complete analysis of boundary fluxes for each model runs use the script `analyze_boundary_fluxes.py`. Running this script with an argument pointing to a model result csv file like `python analyze_boundary_fluxes.py model_output/final_model_results.csv` will load VTK files and calculate fluxes over the land surface and seabed for each run.
+For a more complete analysis of boundary fluxes for each model runs use the script `analyze_boundary_fluxes.py`. Running this script with an argument pointing to a model result csv file like `python analyze_boundary_fluxes.py model_output/final_model_results.csv` will load all VTK files named in this file and report fluxes over the land surface and seabed for each run.
 
 
 ## Example datasets
