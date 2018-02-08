@@ -32,8 +32,8 @@ conc_only = False
 year = 365.25 * 24 * 60 * 60
 
 # x and y resolution for showing contours (m)
-dx = 0.0025
-dy = 0.0025
+dx = 2.0
+dy = 2.0
 
 # plot every x flow arrows
 thin_arrows = 100

@@ -158,14 +158,19 @@ def convert_to_grid(x, y, qx, qy, dx=1.0, dy=1.0):
 
 
 if 'vtu' in sys.argv[-1]:
-    vtk_files = [sys.argv[-1]]
+
+    vtk_file = sys.argv[-1]
 
     try:
-        assert 'Elements' in sys.argv[-1]
+        assert vtk_file[-4:] == '.vtu'
     except AssertionError:
-        raise NameError('file name does not end with _Elements.vtu, are you sure this is a grompy/escript VTK file?')
+        raise NameError('file name does not end with .vtu, are you sure this is a grompy/escript VTK file?')
 
-    fe_file = sys.argv[-1].split('_Elements.vtu')[0] + '_FaceElements.vtu'
+    if '_Elements.vtu' not in vtk_file:
+        vtk_file = vtk_file.split('.vtu')[0] + '_Elements.vtu'
+
+    fe_file = vtk_file.split('_Elements.vtu')[0] + '_FaceElements.vtu'
+    vtk_files = [vtk_file]
     vtkf_files = [fe_file]
 
     folder = os.path.split(sys.argv[-1])[0]

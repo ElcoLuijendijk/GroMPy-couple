@@ -83,6 +83,7 @@ class ModelOptions():
 
 
 class ModelParameters(dict):
+
     """
     Class that contains all default model variables.
     """
@@ -358,32 +359,6 @@ class ParameterRanges():
     change parameter topo_gradient in the ``model_parameters.py`` file and
     will first run a model scenario with a gradient of 0.01 and then one
     with a gradient of 0.1
-
     """
 
-    # model dimension (m)
-    L_s = [1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 7500, 10000, 15000, 20000, 25000, 30000, 35000, 40000]
-
-    # topographic gradients (m/m)
-    topo_gradient_s = 10**(np.arange(-4.0, -0.25, 0.125))
-
-    # groundwater recharge (m/sec)
-    recharge_flux_s = np.array([0.001, 0.0025, 0.005, 0.01, 0.015, 0.02, 0.025, 0.05, 0.075, 0.1, 0.2, 0.3, 0.4, 0.5,
-                                0.75, 1.0, 1.25, 1.5, 1.75]) / 31557600.0
-
-    # permeability
-    k_s = np.concatenate([np.array([10**-20, 10**-18, 10**-17, 10**-16]),
-                          10**np.arange(-15.0, -13, 0.5),
-                          10**np.arange(-12.75, -9.75, 0.5)])
-
-    # aquife thickness (m)
-    thickness_s = np.arange(25.0, 525.0, 25.0)
-
-    # permeability anisotropy (dimensionless)
-    anisotropy_s = [1, 2, 4, 6, 8, 10, 20, 40, 60, 80, 100, 200]
-
-    # longitudinal dispersivities (m)
-    l_disp_s = np.arange(25.0, 175.0, 25.0)[::-1]
-
-    # discretization of zone around fresh-salt water interface:
-    grid_refinement_factor_s = np.arange(0.1, 1.1, 0.1)
+    L_s = [8045.]
