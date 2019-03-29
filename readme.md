@@ -1,11 +1,11 @@
-# Grompy: Groundwater flow and solute transport modeling in Python
+# GroMPy-couple: Coupled density-driven groundwater flow and solute transport model using Python
 
-Grompy is a 2D cross-sectional model of coupled density-driven groundwater flow and solute transport. The groundwater flow and solute transport euqations are solved by an external finite element model code [Escript/Finley](https://launchpad.net/escript-finley). The exchange between groundwater and baseflow/evapotranspiration simulated using a seepage algorithm. Grompy includes support for automated runs of series of model experiments using parallel computing.
+GroMPy-couple is a 2D cross-sectional model of coupled density-driven groundwater flow and solute transport. The groundwater flow and solute transport euqations are solved by an external finite element model code [Escript/Finley](https://launchpad.net/escript-finley). The exchange between groundwater and baseflow/evapotranspiration simulated using a seepage algorithm. GroMPy-couple includes support for automated runs of series of model experiments using parallel computing.
 
 ## Getting Started
 
 ### Required modules
-Grompy requires the following Python modules:
+GroMPy-couple requires the following Python modules:
 
 * escript-finley: https://launchpad.net/escript-finley
 * NumPy:  http://sourceforge.net/projects/numpy/files/NumPy/
@@ -14,27 +14,27 @@ Grompy requires the following Python modules:
     * Scipy: http://sourceforge.net/projects/scipy/files/scipy/
     * Matplotlib: http://matplotlib.org/downloads.html
 
-These modules are available as standalone packages, follow the links above to download the installation files or use your package manager to install them. For Mac and Windows operating systems an easy way to get a working version of python and these modules is to install free Python distributions that already contain all the necessary modules, such as [Anaconda](https://www.anaconda.com), [Canopy](https://www.enthought.com/products/canopy) or [pythonxy](http://python-xy.github.io). Note that the Windows version of escript has not been updated since 2013 and may not work with the current version of Grompy.
+These modules are available as standalone packages, follow the links above to download the installation files or use your package manager to install them. For Mac and Windows operating systems an easy way to get a working version of python and these modules is to install free Python distributions that already contain all the necessary modules, such as [Anaconda](https://www.anaconda.com), [Canopy](https://www.enthought.com/products/canopy) or [pythonxy](http://python-xy.github.io). Note that the Windows version of escript has not been updated since 2013 and may not work with the current version of GroMPy-couple.
 
-Grompy was tested on Ubuntu linux versions 14.04 and 16.04, and escript versions 4.0 to 5.1.
+GroMPy-couple was tested on Ubuntu linux versions 14.04, 16.04 and 18.04 and escript versions 4.0 to 5.1.
 
 ### Installing escript and Grompy 
 * Click the download link on the right for a zip file of the source code, or clone the repository
 * Install escript
     * get the code here: https://launchpad.net/escript-finley
     * an installation guide can be found here: http://esys.geocomp.uq.edu.au/docs
-* Unzip the grompy source code
+* Unzip the GroMPy-couple source code
 
 ### Running an example dataset
 * Navigate to the directory where you have installed escript and navigate the src/bin directory 
-* Execute Grompy by executing the following command from the command line:
+* Execute GroMPy-couple by executing the following command from the command line:
 	
 ```shell
 ./run-escript grompy_directory/grompy.py model_input/model_parameters.py
 ```
 
-* `grompy_directory` is the directory where you have saved Grompy. Grompy will now simulate groundwater flow and coastal groundwater discharge using input parameters stored in the file `model_parameters.py` in the model_input directory.
-* Alternatively you can also run Grompy directly from the same directory where Grompy is located by typing `python grompy.py model_input/model_parameters.py`. However for this to work you first need to add a number of variables to your .bashrc or profile file. Go to the escript/bin directory and type `./run-escript -v` to get a list of the items that you have to add (PATH, LD_LIBRARY_PATH, PYTHONPATH and ESCRIPT_NUM_THREADS), and copy-paste them to you barshrc file. After restarting your terminal and you should now be able to run Grompy directly without using `run-escript`.
+* `grompy_directory` is the directory where you have saved GroMPy-couple. GroMPy-couple will now simulate groundwater flow and coastal groundwater discharge using input parameters stored in the file `model_parameters.py` in the model_input directory.
+* Alternatively you can also run GroMPy-couple directly from the same directory where GroMPy-couple is located by typing `python grompy.py model_input/model_parameters.py`. However for this to work you first need to add a number of variables to your .bashrc or profile file. Go to the escript/bin directory and type `./run-escript -v` to get a list of the items that you have to add (PATH, LD_LIBRARY_PATH, PYTHONPATH and ESCRIPT_NUM_THREADS), and copy-paste them to you barshrc file. After restarting your terminal and you should now be able to run GroMPy-couple directly without using `run-escript`.
 
 
 ## Model input 
@@ -56,7 +56,7 @@ $ python grompy_parallel.py model_parameters_sensitivity.py
 
 This will automatically run all model experiments specified in the model_parameters_sensitivity.py file.
 
-The number of simultaneous model runs is controlled by the parameter `max_proc` in the model parameters file. Note that each single model run will still use the number of cores specified by run-escript (using the -t argument, see the escript documentation), or the OMP_NUM_THREADS setting in your .bashrc or profile file. For example add the following line to your bashrc file if you want grompy to use 10 threads for each model run add export OMP_NUM_THREADS=10. If you then set `max_proc = 4` and run grompy_parallel.py, 4 model runs will be executed simultaneously that each use 10 cores. grompy_parallel will start a new run once a run has finished until the entire set of model sensitivity or model parameter combination runs are done.
+The number of simultaneous model runs is controlled by the parameter `max_proc` in the model parameters file. Note that each single model run will still use the number of cores specified by run-escript (using the -t argument, see the escript documentation), or the OMP_NUM_THREADS setting in your .bashrc or profile file. For example add the following line to your bashrc file if you want GroMPy-couple to use 10 threads for each model run add export OMP_NUM_THREADS=10. If you then set `max_proc = 4` and run grompy_parallel.py, 4 model runs will be executed simultaneously that each use 10 cores. grompy_parallel will start a new run once a run has finished until the entire set of model sensitivity or model parameter combination runs are done.
 
 
 ## Model output
@@ -65,7 +65,7 @@ The number of simultaneous model runs is controlled by the parameter `max_proc` 
 The mesh and variables are saved as VTK files. The VTK files are saved at a location that you can specify by setting the parameter `model_output_dir` in the model parameter file. VTK files can be used by applications such as [Paraview](https://www.paraview.org) or [Mayavi](http://docs.enthought.com/mayavi/mayavi/) to visualize model results.
 
 ### Figures
-In addition, Grompy contains a separate python script, ``make_model_fig.py``, to make figures of the model output. To run this file, open a terminal, navigate to the Grompy directory and run the command `python make_model_fig.py vtk_file`, where `vtk_file` is the path to the VTK file that you would like to make a figure of. If you do not provide a VTK filename and simply run `python make_2d_model_fig.py` the script will look for VTK files in the directory `model_output` and will ask you which subdirectory and which vtk files you want select. Any figures created by this script are saved to new subdirectory `fig` that is placed in the directory that contains the VTK file. The file `model_input/figure_options.py` contains several parameters that control how the figures look,
+In addition, GroMPy-couple contains a separate python script, ``make_model_fig.py``, to make figures of the model output. To run this file, open a terminal, navigate to the GroMPy-couple directory and run the command `python make_model_fig.py vtk_file`, where `vtk_file` is the path to the VTK file that you would like to make a figure of. If you do not provide a VTK filename and simply run `python make_2d_model_fig.py` the script will look for VTK files in the directory `model_output` and will ask you which subdirectory and which vtk files you want select. Any figures created by this script are saved to new subdirectory `fig` that is placed in the directory that contains the VTK file. The file `model_input/figure_options.py` contains several parameters that control how the figures look,
 
 ### Text/CSV files
 For each model run input and output data are stored in a .csv file that can be opened with any spreadsheet program or text editor. The filename is `final_model_results_name_date.csv` where name is the model name that you specified in the `scenario_name` parameter in the parameter file and date is a string of the current date. This file contains a copy of each input parameter in the `ModelParameters` class, including the changes made for the parameters that are located in the `ParameterRanges` class for automated multiple model runs. In addition, this file contains a number of other columns with information on the runtime, model convergence, modeled solute concentrations, pressure and fluxes, and some information on the fluxes over the land or sea boundary. Note that the reported boundary fluxes may not be correct for models with an inclined top surface. 
