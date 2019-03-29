@@ -1,8 +1,11 @@
+from __future__ import print_function
+
 """
 Read a a VTK (.vtu) file of an unstructured grid and return arrays of the variables
 """
 
 __author__ = 'Elco Luijendijk'
+
 
 
 import numpy as np
@@ -67,7 +70,7 @@ def find_pointdata(di, npts):
 
         var_name = find_name_after_index(di[pt_data_ind], 'Name=')
 
-        print 'found var name: ', var_name
+        print('found var name: ', var_name)
 
         ncomponents = find_number_after_index(di[pt_data_ind], 'NumberOfComponents=')
 
@@ -107,7 +110,7 @@ def find_celldata(di, ncells):
 
         var_name = find_name_after_index(di[cell_data_ind], 'Name=')
 
-        print 'found var name: ', var_name
+        print('found var name: ', var_name)
 
         ncomponents = find_number_after_index(di[cell_data_ind], 'NumberOfComponents=')
 

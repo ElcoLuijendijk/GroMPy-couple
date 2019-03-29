@@ -28,6 +28,8 @@ from lib.grompy_lib import get_normal_flux_to_bnd
 
 from model_input.figure_options import *
 
+from matplotlib import ticker
+
 
 def add_subplot_axes(ax, rect, axisbg='w'):
     """
@@ -175,91 +177,93 @@ if 'vtu' in sys.argv[-1]:
 
     folder = os.path.split(sys.argv[-1])[0]
 
+
 elif folder is None:
-        dirs = os.listdir(base_dir)
-        dirs = [os.path.join(base_dir, directory) for directory in dirs]
-        dirs.sort(key=os.path.getmtime)
-        dirs = dirs[::-1]
+    dirs = os.listdir(base_dir)
+    dirs = [os.path.join(base_dir, directory) for directory in dirs]
+    dirs.sort(key=os.path.getmtime)
+    dirs = dirs[::-1]
 
-        print 'grompy-salt output directories from newest to oldest:'
-        for i, directory in enumerate(dirs):
-            print i, directory
+    print 'grompy-salt output directories from newest to oldest:'
+    for i, directory in enumerate(dirs):
+        print i, directory
 
-        print '\nenter number or enter for the newest directory:'
-        selection = raw_input()
+    print '\nenter number or enter for the newest directory:'
+    selection = raw_input()
 
-        if selection.isdigit() is True:
-            folder = dirs[int(selection)]
-        else:
-            folder = dirs[0]
+    if selection.isdigit() is True:
+        folder = dirs[int(selection)]
+    else:
+        folder = dirs[0]
+    folder = os.path.join(folder, 'vtk_files')
 
 else:
     folder = os.path.join(folder, 'vtk_files')
 
-    print 'enter f to make a figure for final results only or enter to include all timesteps'
-    selection = raw_input()
-    if 'f' in selection:
-        final_figs_only = True
+print 'enter f to make a figure for final results only or enter to include all timesteps'
+selection = raw_input()
+if 'f' in selection:
+    final_figs_only = True
+else:
+    final_figs_only = False
+
+fns = os.listdir(folder)
+
+vtk_files = [fn for fn in fns
+             if fn[-4:] == '.vtu' and 'FaceElements' not in fn]
+vtkf_files = [fn for fn in fns
+             if fn[-4:] == '.vtu' and 'FaceElements' in fn]
+
+if final_figs_only is True:
+    vtk_files = [f for f in vtk_files if 'final' in f]
+    vtkf_files = [f for f in vtkf_files if 'final' in f]
+#if model_scenario is not '' and model_scenario is not None:
+#    vtk_files = [f for f in vtk_files if model_scenario in f]
+#    vtkf_files = [f for f in vtkf_files if model_scenario in f]
+
+#files.sort(key=os.path.getmtime)
+vtk_files = [os.path.join(folder, vtk_file) for vtk_file in vtk_files]
+vtkf_files = [os.path.join(folder, vtkf_file) for vtkf_file in vtkf_files]
+
+vtk_files.sort(key=os.path.getmtime)
+vtkf_files.sort(key=os.path.getmtime)
+
+vtk_files = vtk_files[::-1]
+vtkf_files = vtkf_files[::-1]
+
+# select file to show:
+print 'grompy-salt output files, from newest to oldest:'
+for i, vtk_file in enumerate(vtk_files):
+    print i, os.path.split(vtk_file)[-1]
+
+print '\nenter number of output file to show, two numbers separated by -, ' \
+      'a for all files, or r for a random selection of 10 files or enter for the newest file:'
+selection = raw_input()
+
+if selection.isdigit() is True:
+    vtk_files = [vtk_files[int(selection)]]
+    vtkf_files = [vtkf_files[int(selection)]]
+elif '-' in selection:
+    s2 = selection.split('-')
+    start = int(s2[0])
+    end = int(s2[1])
+    vtk_files = vtk_files[start:end]
+    vtkf_files = vtkf_files[start:end]
+elif len(selection) > 0 and selection[0] == 'r':
+    if len(selection) > 1:
+        nrand = int(selection[1:])
     else:
-        final_figs_only = False
+        nrand = 10
+    selection_list = [random.randint(0, len(vtk_files)) for i in range(nrand)]
 
-    fns = os.listdir(folder)
+    v = [vtk_files[i] for i in selection_list]
+    vf = [vtkf_files[i] for i in selection_list]
 
-    vtk_files = [fn for fn in fns
-                 if fn[-4:] == '.vtu' and 'FaceElements' not in fn]
-    vtkf_files = [fn for fn in fns
-                 if fn[-4:] == '.vtu' and 'FaceElements' in fn]
-
-    if final_figs_only is True:
-        vtk_files = [f for f in vtk_files if 'final' in f]
-        vtkf_files = [f for f in vtkf_files if 'final' in f]
-    if model_scenario is not '' and model_scenario is not None:
-        vtk_files = [f for f in vtk_files if model_scenario in f]
-        vtkf_files = [f for f in vtkf_files if model_scenario in f]
-
-    #files.sort(key=os.path.getmtime)
-    vtk_files = [os.path.join(folder, vtk_file) for vtk_file in vtk_files]
-    vtkf_files = [os.path.join(folder, vtkf_file) for vtkf_file in vtkf_files]
-
-    vtk_files.sort(key=os.path.getmtime)
-    vtkf_files.sort(key=os.path.getmtime)
-
-    vtk_files = vtk_files[::-1]
-    vtkf_files = vtkf_files[::-1]
-
-    # select file to show:
-    print 'grompy-salt output files, from newest to oldest:'
-    for i, vtk_file in enumerate(vtk_files):
-        print i, os.path.split(vtk_file)[-1]
-
-    print '\nenter number of output file to show, two numbers separated by -, ' \
-          'a for all files, or r for a random selection of 10 files or enter for the newest file:'
-    selection = raw_input()
-
-    if selection.isdigit() is True:
-        vtk_files = [vtk_files[int(selection)]]
-        vtkf_files = [vtkf_files[int(selection)]]
-    elif '-' in selection:
-        s2 = selection.split('-')
-        start = int(s2[0])
-        end = int(s2[1])
-        vtk_files = vtk_files[start:end]
-        vtkf_files = vtkf_files[start:end]
-    elif len(selection) > 0 and selection[0] == 'r':
-        if len(selection) > 1:
-            nrand = int(selection[1:])
-        else:
-            nrand = 10
-        selection_list = [random.randint(0, len(vtk_files)) for i in range(nrand)]
-
-        v = [vtk_files[i] for i in selection_list]
-        vf = [vtkf_files[i] for i in selection_list]
-
-        vtk_files = v
-        vtkf_files = vf
-    elif selection == '':
-        vtk_files = [vtk_files[0]]
-        vtkf_files = [vtkf_files[0]]
+    vtk_files = v
+    vtkf_files = vf
+elif selection == '':
+    vtk_files = [vtk_files[0]]
+    vtkf_files = [vtkf_files[0]]
 
 print 'make a figure of solute concentration (enter) only or all parameters (a)'
 
@@ -355,7 +359,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
         axi.get_yaxis().tick_left()
 
     if add_colorbar is True:
-        rect = [0.75, 0.15, 0.23, 0.03]
+        rect = [0.75, 0.15, 0.3, 0.03]
         cax2 = add_subplot_axes(ax, rect, axisbg='w')
 
     # create polygons
@@ -650,13 +654,18 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
                 if add_colorbar is True:
                     if show_elements is True:
                         cb = fig.colorbar(elements,
-                                          cax=cax2, ticks=[0.0, 0.02, 0.035],
+                                          cax=cax2,
                                           orientation='horizontal')
                     else:
                         cb = fig.colorbar(leg_sc,
-                                          cax=cax2, ticks=[0.0, 0.02, 0.035],
+                                          cax=cax2,
                                           orientation='horizontal')
                     cb.ax.tick_params(labelsize=leg_fontsize)
+
+                    # (generate plot here)
+                    tick_locator = ticker.MaxNLocator(nbins=3)
+                    cb.locator = tick_locator
+                    cb.update_ticks()
 
             if add_colorbar is True:
                 if 'concentration' in pt_var_name:

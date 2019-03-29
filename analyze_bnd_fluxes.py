@@ -13,6 +13,7 @@ matplotlib.use('Agg')
 
 import os
 import re
+import sys
 
 import numpy as np
 import matplotlib.pyplot as pl
@@ -50,7 +51,7 @@ if model_result_file is None:
     folder = files[int(raw_input())]
 
     files = os.listdir(folder)
-    files = [os.path.join(folder, f) for f in files]
+    files = [os.path.join(folder, f) for f in files if f[-4:] == '.csv']
     files.sort()
     for i, f in enumerate(files):
         print i, os.path.split(f)[-1]
@@ -264,21 +265,21 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
         get_normal_flux_to_bnd(flux_top_sorted,
                                top_xy_ele)
 
-    dist = get_distance(top_xy_ele)
-    flux_top_int = flux_top[:, 1] * dist
+    dist_ele = get_distance(top_xy_ele)
+    flux_top_int = flux_top[:, 1] * dist_ele
 
     # get flux normal to boundary:
-    ind_sea = top_xy_ele[:, 0] <= 0
-    ind_land = top_xy_ele[:, 0] > 0
+    ind_sea_ele = top_xy_ele[:, 0] <= 0
+    ind_land_ele = top_xy_ele[:, 0] > 0
 
-    flux_in = flux_top[:, 1] < 0
-    flux_out = flux_top[:, 1] > 0
+    flux_in_ele = flux_top[:, 1] < 0
+    flux_out_ele = flux_top[:, 1] > 0
 
-    ind_sea_in = ind_sea & flux_in
-    ind_sea_out = ind_sea & flux_out
+    ind_sea_in_ele = ind_sea_ele & flux_in_ele
+    ind_sea_out_ele = ind_sea_ele & flux_out_ele
 
-    ind_land_in = ind_land & flux_in
-    ind_land_out = ind_land & flux_out
+    ind_land_in_ele = ind_land_ele & flux_in_ele
+    ind_land_out_ele = ind_land_ele & flux_out_ele
 
     ####################################
     # store results in pandas dataframe
@@ -287,20 +288,28 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
     df.ix[fileno, 'model_name'] = vtk_file
 
     # calculate fluxes
+
+    # total
+    df.ix[fileno, 'vtk_flux_in'] = np.sum(flux_top_int[flux_in_ele])
+    df.ix[fileno, 'vtk_flux_out'] = np.sum(flux_top_int[flux_out_ele])
+
     # sea
-    df.ix[fileno, 'vtk_flux_sea_in'] = np.sum(flux_top_int[ind_sea_in])
-    df.ix[fileno, 'vtk_flux_sea_out'] = np.sum(flux_top_int[ind_sea_out])
-    df.ix[fileno, 'vtk_flux_sea_total'] = np.sum(flux_top_int[ind_sea])
+    df.ix[fileno, 'vtk_flux_sea_in'] = np.sum(flux_top_int[ind_sea_in_ele])
+    df.ix[fileno, 'vtk_flux_sea_out'] = np.sum(flux_top_int[ind_sea_out_ele])
+    df.ix[fileno, 'vtk_flux_sea_total'] = np.sum(flux_top_int[ind_sea_ele])
     df.ix[fileno, 'vtk_min_flux_sea'] = np.min(nodal_flux_top[:, 1][ind_sea])
     df.ix[fileno, 'vtk_max_flux_sea'] = np.max(nodal_flux_top[:, 1][ind_sea])
 
     # land
-    df.ix[fileno, 'vtk_flux_land_in'] = np.sum(flux_top_int[ind_land_in])
-    df.ix[fileno, 'vtk_flux_land_out'] = np.sum(flux_top_int[ind_land_out])
-    df.ix[fileno, 'vtk_flux_land_total'] = np.sum(flux_top_int[ind_land])
-    df.ix[fileno, 'vtk_min_flux_land'] = np.min(flux_top[:, 1][ind_land])
-    df.ix[fileno, 'vtk_max_flux_land'] = np.max(flux_top[:, 1][ind_land])
-    df.ix[fileno, 'vtk_flux_land_right_hand_bnd'] = flux_top[:, 1][ind_land][-1]
+    df.ix[fileno, 'vtk_flux_land_in'] = np.sum(flux_top_int[ind_land_in_ele])
+    df.ix[fileno, 'vtk_flux_land_out'] = np.sum(flux_top_int[ind_land_out_ele])
+    df.ix[fileno, 'vtk_flux_land_total'] = np.sum(flux_top_int[ind_land_ele])
+    df.ix[fileno, 'vtk_min_flux_land'] = np.min(flux_top[:, 1][ind_land_ele])
+    df.ix[fileno, 'vtk_max_flux_land'] = np.max(flux_top[:, 1][ind_land_ele])
+    df.ix[fileno, 'vtk_flux_land_right_hand_bnd'] = flux_top[:, 1][ind_land_ele][-1]
+
+    df.ix[fileno, 'vtk_bnd_flux_left'] = flux_top[0, 1]
+    df.ix[fileno, 'vtk_bnd_flux_right'] = flux_top[-1, 1]
 
     df.ix[fileno, 'vtk_submarine_discharge_area'] = np.sum(dist * ind_sea_out)
     df.ix[fileno, 'vtk_submarine_recharge_area'] = np.sum(dist * ind_sea_in)
@@ -315,20 +324,20 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
         flux_in_threshold = flux_top[:, 1] < -flux_threshold
         flux_out_threshold = flux_top[:, 1] > flux_threshold
 
-        ind_sea_in_threshold = ind_sea & flux_in_threshold
-        ind_sea_out_threshold = ind_sea & flux_out_threshold
+        ind_sea_in_threshold = ind_sea_ele & flux_in_threshold
+        ind_sea_out_threshold = ind_sea_ele & flux_out_threshold
 
-        ind_land_in_threshold = ind_land & flux_in_threshold
-        ind_land_out_threshold = ind_land & flux_out_threshold
+        ind_land_in_threshold = ind_land_ele & flux_in_threshold
+        ind_land_out_threshold = ind_land_ele & flux_out_threshold
 
         df.ix[fileno, 'vtk_submarine_discharge_area_threshold_50perc_max'] = \
-            np.sum(dist * ind_sea_out_threshold)
+            np.sum(dist_ele * ind_sea_out_threshold)
         df.ix[fileno, 'vtk_land_discharge_area_threshold_50perc_max'] = \
-            np.sum(dist * ind_land_out_threshold)
+            np.sum(dist_ele * ind_land_out_threshold)
 
     # calculate normalized cumulative flux
-    cumulative_flux_top_land = np.cumsum(flux_top_int[ind_land_out]) / np.sum(flux_top_int[ind_land_out])
-    cumulative_flux_top_sea = np.cumsum(flux_top_int[ind_sea_out][::-1]) / np.sum(flux_top_int[ind_sea_out])
+    cumulative_flux_top_land = np.cumsum(flux_top_int[ind_land_out_ele]) / np.sum(flux_top_int[ind_land_out_ele])
+    cumulative_flux_top_sea = np.cumsum(flux_top_int[ind_sea_out_ele][::-1]) / np.sum(flux_top_int[ind_sea_out_ele])
     cumulative_flux_top_sea = cumulative_flux_top_sea[::-1]
 
     # calculate area where x % of the total terrestrial or marine discharge takes place:
@@ -338,14 +347,14 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
         try:
             ind_landc = np.where(cumulative_flux_top_land > flux_threshold2)[0][0]
             df.ix[fileno, 'vtk_land_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = \
-                np.sum(dist[ind_land_out][:ind_landc])
+                np.sum(dist_ele[ind_land_out_ele][:ind_landc])
         except:
             df.ix[fileno, 'vtk_land_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = 0.0
 
         try:
             ind_seac = np.where(cumulative_flux_top_sea > flux_threshold2)[0][-1]
             df.ix[fileno, 'vtk_sea_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = \
-                np.sum(dist[ind_sea_out][ind_seac:])
+                np.sum(dist_ele[ind_sea_out_ele][ind_seac:])
         except:
             df.ix[fileno, 'vtk_sea_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = 0.0
 
@@ -359,6 +368,16 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
     # relative error in top bnd flux,
     df.ix[fileno, 'vtk_flux_error'] = np.abs(np.sum(flux_top_int)) / (np.abs(np.sum(flux_top_int[flux_top_int<0]))
                                                                        + np.abs(np.sum(flux_top_int[flux_top_int>0])))
+
+    # add max extent seepage bnd:
+    if 'active_seepage_bnd' in pt_var_names:
+        si = pt_var_names.index('active_seepage_bnd')
+        s = pt_var_arrays[si]
+        if s.max() >= 1:
+            xys = xy_pts[s == 1]
+            df.ix[fileno, 'max_x_active_seepage_bnd'] = xys[:, 0].max()
+        else:
+            df.ix[fileno, 'max_x_active_seepage_bnd'] = np.nan
 
     print 'flux sea out (m2/yr) = ', df.ix[fileno, 'vtk_flux_sea_out']
     print 'flux sea in (m2/yr) = ', df.ix[fileno, 'vtk_flux_sea_in']

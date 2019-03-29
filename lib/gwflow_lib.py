@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 """
 functions to solve groundwater flow, solute transport and heat
 transport equations using the generic finite element model escript/Finley 
@@ -14,7 +16,7 @@ import numpy as np
 try:
     import esys.escript as es
 except ImportError:
-    print 'warning, could not find escript module'
+    print('warning, could not find escript module')
 
 
 def calculate_q(k_vector, viscosity, pressure, density, g_vector):
@@ -64,10 +66,10 @@ def solve_steady_state_pressure_eq_new(mesh, topo_gradient, pressure_pde,
 
     debug = True
     if debug is True:
-        print 'initial calculated steady-state pressure: ', pressure
+        print('initial calculated steady-state pressure: ', pressure)
 
     if es.sup(drain_bnd_loc) == 0:
-        print 'no drain or seepage bnd'
+        print('no drain or seepage bnd')
         active_seepage_bnd = es.wherePositive(drain_bnd_loc)
 
         return pressure, active_seepage_bnd
@@ -78,8 +80,8 @@ def solve_steady_state_pressure_eq_new(mesh, topo_gradient, pressure_pde,
     active_seepage_bnd = es.wherePositive(drain_bnd_loc * pressure - pressure_threshold)
 
     if debug is True:
-        print 'active seepage nodes: ', np.sum(np.array(active_seepage_bnd.toListOfTuples()))
-        print 'potential seepage nodes: ', np.sum(np.array(drain_bnd_loc.toListOfTuples()))
+        print('active seepage nodes: ', np.sum(np.array(active_seepage_bnd.toListOfTuples())))
+        print('potential seepage nodes: ', np.sum(np.array(drain_bnd_loc.toListOfTuples())))
 
     n_seepage_change = 9999
     n_seepage_nodes = 99999
@@ -103,7 +105,7 @@ def solve_steady_state_pressure_eq_new(mesh, topo_gradient, pressure_pde,
         pressure = pressure_pde.getSolution()
 
         if debug is True:
-            print 'new pressure: ', pressure
+            print('new pressure: ', pressure)
 
         # calculate flux
         q = calculate_q(k_vector, viscosity, pressure,
@@ -111,9 +113,9 @@ def solve_steady_state_pressure_eq_new(mesh, topo_gradient, pressure_pde,
         proj.setValue(D=es.kronecker(mesh), Y=q)
         try:
             nodal_q = proj.getSolution()
-        except RuntimeError, msg:
-            print 'error, non-convergence'
-            print msg
+        except RuntimeError(msg):
+            print('error, non-convergence')
+            print(msg)
             non_convergence = True
 
         # calculate max vertical flux into the model domain at
@@ -143,13 +145,13 @@ def solve_steady_state_pressure_eq_new(mesh, topo_gradient, pressure_pde,
         removed_seepage_inflow_nodes = seepage_inflow_nodes
 
         if debug is True:
-            print 'number of seepage inflow nodes: ', \
-                np.sum(np.array(seepage_inflow_nodes.toListOfTuples()))
+            print('number of seepage inflow nodes: ', \
+                np.sum(np.array(seepage_inflow_nodes.toListOfTuples())))
 
             xmin_seep = es.inf(seepage_inflow_nodes * seepage_inflow_nodes.getDomain().getX()[0] + (1-seepage_inflow_nodes) * 999999)
             xmax_seep = es.sup(seepage_inflow_nodes * seepage_inflow_nodes.getDomain().getX()[0])
 
-            print 'from x= %0.2f m to x= %0.2f m' % (xmin_seep, xmax_seep)
+            print('from x= %0.2f m to x= %0.2f m' % (xmin_seep, xmax_seep))
 
 
         # add boundary nodes with P>0 to seepage bnd
@@ -159,8 +161,8 @@ def solve_steady_state_pressure_eq_new(mesh, topo_gradient, pressure_pde,
                              * pressure)
 
         if debug is True:
-            print 'number of new seepage nodes: ', \
-                np.sum(np.array(new_seepage_nodes.toListOfTuples()))
+            print('number of new seepage nodes: ', \
+                np.sum(np.array(new_seepage_nodes.toListOfTuples())))
 
         # update the seepage bnd
         active_seepage_bnd = (active_seepage_bnd
@@ -173,17 +175,17 @@ def solve_steady_state_pressure_eq_new(mesh, topo_gradient, pressure_pde,
         n_seepage_change = np.abs(n_seepage_nodes_old - n_seepage_nodes)
 
         if debug is True:
-            print 'final active seepage nodes: ', np.sum(np.array(active_seepage_bnd.toListOfTuples()))
-            print 'potential seepage nodes: ', np.sum(np.array(drain_bnd_loc.toListOfTuples()))
+            print('final active seepage nodes: ', np.sum(np.array(active_seepage_bnd.toListOfTuples())))
+            print('potential seepage nodes: ', np.sum(np.array(drain_bnd_loc.toListOfTuples())))
 
         if n_seepage_nodes_old < n_seepage_nodes:
-            print 'lowest number of seepage nodes reached, stopping iterations'
+            print('lowest number of seepage nodes reached, stopping iterations')
             n_seepage_change = 0
 
-        print 'seepage iteration %i' % n_iter
-        print 'seepage threshold ', seepage_threshold * year
-        print 'change in seepage nodes from %0.0f to %0.0f' % (n_seepage_nodes_old,
-                                                               n_seepage_nodes)
+        print('seepage iteration %i' % n_iter)
+        print('seepage threshold ', seepage_threshold * year)
+        print('change in seepage nodes from %0.0f to %0.0f' % (n_seepage_nodes_old,
+                                                               n_seepage_nodes))
 
         n_iter += 1
 
@@ -203,7 +205,7 @@ def solve_steady_state_pressure_eq_new(mesh, topo_gradient, pressure_pde,
     pressure = pressure_pde.getSolution()
 
     if debug is True:
-        print 'final pressure: ', pressure
+        print('final pressure: ', pressure)
 
     return pressure, active_seepage_bnd
 
@@ -330,11 +332,11 @@ def update_solute_transport_pde(mesh, solute_pde,
     y_coeff = u_old + solute_source * dt
 
     if verbose is True:
-        print 'solute transport coefficients'
-        print 'A: ', a_coeff.getShape(), a_coeff
-        print 'C: ', c_coeff.getShape(), c_coeff
-        print 'D: ', d_coeff
-        print 'Y: ', y_coeff.getShape(), y_coeff
+        print('solute transport coefficients')
+        print('A: ', a_coeff.getShape(), a_coeff)
+        print('C: ', c_coeff.getShape(), c_coeff)
+        print('D: ', d_coeff)
+        print('Y: ', y_coeff.getShape(), y_coeff)
 
     solute_pde.setValue(A=a_coeff, C=c_coeff, D=d_coeff, Y=y_coeff)
 
@@ -464,7 +466,8 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                              calculate_viscosity=False,
                              verbose=False,
                              iterate_seepage_in_one_timestep=False,
-                             max_seepage_iterations=50):
+                             max_seepage_iterations=50,
+                             ignore_convergence_failure=False):
 
     """
     Iterative solve groundwater flow, solute transport and heat flow equations.
@@ -582,9 +585,9 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
     year = 365.25 *24 * 60 * 60.
 
     if verbose is True:
-        print 'running iterative solver for pressure and concentration PDEs'
+        print('running iterative solver for pressure and concentration PDEs')
         if coupled_iterations is False:
-            print 'pressure and concentration are not coupled'
+            print('pressure and concentration are not coupled')
 
     #pressure_new = pressure
     pressure_old_ts = pressure
@@ -608,13 +611,14 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
     non_convergence = False
     ele_size = None
     q = None
+    v = None
 
     while converged is False and non_convergence is False:
 
         if verbose is True:
-            print 'iteration ', iteration
+            print('iteration ', iteration)
             if iteration > 0:
-                print 'pressure convergence ', es.Lsup(pressure_conv)
+                print('pressure convergence ', es.Lsup(pressure_conv))
 
         if solute_transport is True:
 
@@ -637,9 +641,9 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                 proj.setValue(D=es.kronecker(mesh), Y=q)
                 try:
                     nodal_q = proj.getSolution()
-                except RuntimeError, msg:
-                        print 'error, non-convergence'
-                        print msg
+                except RuntimeError(msg):
+                        print('error, non-convergence')
+                        print(msg)
                         non_convergence = True
 
                 nodal_q_norm = rotate_vector_escript(nodal_q, topo_gradient)
@@ -673,16 +677,16 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                              - min_x))
 
                     if verbose is True:
-                        print 'warning, outflow for all specified ' \
-                              'concentration boundary nodes'
+                        print('warning, outflow for all specified ' \
+                              'concentration boundary nodes')
                         #print 'using entire bnd instead'
                         #active_specified_concentration_bnd = \
                         #    specified_concentration_bnd
-                        print 'using first node as fixed conc bnd instead'
-                        print 'number of active conc bnd nodes:'
-                        print np.sum(np.array(
+                        print('using first node as fixed conc bnd instead')
+                        print('number of active conc bnd nodes:')
+                        print(np.sum(np.array(
                             active_specified_concentration_bnd.
-                            toListOfTuples()))
+                            toListOfTuples())))
 
                 if verbose is True:
                     import grompy_lib
@@ -691,12 +695,12 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                         active_specified_concentration_bnd)
                     xyc, ca = grompy_lib.convert_to_array(
                         specified_concentration_bnd)
-                    print 'inflow conc bnd nodes = %0.0f / %0.0f' \
-                          % (ia.sum(), ca.sum())
-                    print 'x = %0.3f - %0.3f' % (xyi[ia == 1, 0].min(),
-                                                 xyi[ia == 1, 0].max())
-                    print 'qv conc bnd: ', (nodal_q[1] *
-                                            specified_concentration_bnd)
+                    print('inflow conc bnd nodes = %0.0f / %0.0f' \
+                          % (ia.sum(), ca.sum()))
+                    print('x = %0.3f - %0.3f' % (xyi[ia == 1, 0].min(),
+                                                 xyi[ia == 1, 0].max()))
+                    print('qv conc bnd: ', (nodal_q[1] *
+                                            specified_concentration_bnd))
 
             #solute_pde.setValue(D=1,
             #                    r=specified_concentration_rho_f,
@@ -714,10 +718,10 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
             try:
                 #solute_mass = solute_pde.getSolution()
                 concentration = solute_pde.getSolution()
-            except RuntimeError, error_msg:
-                print '!! runtime error ', error_msg
-                print 'solver options: '
-                print solute_pde.getSolverOptions().getSummary()
+            except RuntimeError(error_msg):
+                print('!! runtime error ', error_msg)
+                print('solver options: ')
+                print(solute_pde.getSolverOptions().getSummary())
 
                 non_convergence = True
 
@@ -750,7 +754,7 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
 
         if coupled_iterations is True:
             if verbose is True:
-                print 'recalculating fluid density and viscosity'
+                print('recalculating fluid density and viscosity')
             # recalculate fluid density            
             fluid_density_old = fluid_density_new
             fluid_density_new = \
@@ -785,9 +789,9 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                                     alpha, temperature_change_rate)
             try:
                 pressure = pressure_pde.getSolution()
-            except RuntimeError, msg:
-                print 'error, non-convergence'
-                print msg
+            except RuntimeError(msg):
+                print('error, non-convergence')
+                print(msg)
                 non_convergence = True
             #print 'no seepage bnd'
         else:
@@ -830,7 +834,7 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                 try:
                     pressure = pressure_pde.getSolution()
                 except RuntimeError:
-                    print "error, pressure PDE solver failed"
+                    print("error, pressure PDE solver failed")
                     converged = True
                     non_convergence = True
                     #if pressure_new not in locals():
@@ -852,10 +856,10 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                         seepage_array = np.array(
                             active_seepage_bnd.toListOfTuples())
                         ind = seepage_array > 0
-                        print '\tbefore adjustment:'
-                        print '\tactive seepage bnd from x=%0.0f to %0.0f m' \
+                        print('\tbefore adjustment:')
+                        print('\tactive seepage bnd from x=%0.0f to %0.0f m' \
                               % (seepage_nodes_xy[ind, 0].min(),
-                                 seepage_nodes_xy[ind, 0].max())
+                                 seepage_nodes_xy[ind, 0].max()))
 
                     # remove seepage nodes that have become source of water
                     q = calculate_q(k_vector, viscosity_new, pressure,
@@ -863,9 +867,9 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                     proj.setValue(D=es.kronecker(mesh), Y=q)
                     try:
                         nodal_q = proj.getSolution()
-                    except RuntimeError, msg:
-                        print 'error, non-convergence'
-                        print msg
+                    except RuntimeError(msg):
+                        print('error, non-convergence')
+                        print(msg)
                         non_convergence = True
 
                     # calculate max vertical flux into the model domain at
@@ -891,9 +895,9 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
 
                     if verbose is True:
 
-                        print '\tflux seepage bnd (m/yr): ', flux_seepage_bnd * year
-                        print 'recharge '
-                        print '\tseepage inflow nodes: ', seepage_inflow_nodes
+                        print('\tflux seepage bnd (m/yr): ', flux_seepage_bnd * year)
+                        print('recharge ')
+                        print('\tseepage inflow nodes: ', seepage_inflow_nodes)
 
                     #seepage_inflow_nodes = \
                     #    es.whereNegative(flux_seepage_bnd)
@@ -918,11 +922,11 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                         seepage_array = np.array(
                             active_seepage_bnd.toListOfTuples())
                         ind = np.array(seepage_array > 0)
-                        print '\tafter adjustment:'
-                        print '\tN=%i active seepage bnd x=%0.0f to %0.0f m' \
+                        print('\tafter adjustment:')
+                        print('\tN=%i active seepage bnd x=%0.0f to %0.0f m' \
                               % (np.sum(ind.astype(int)),
                                  seepage_nodes_xy[ind, 0].min(),
-                                 seepage_nodes_xy[ind, 0].max())
+                                 seepage_nodes_xy[ind, 0].max()))
 
                     if iterate_seepage_in_one_timestep is True:
                         # update the specified pressure boundary to include
@@ -961,9 +965,9 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                         # recalculate pressure
                         try:
                             pressure = pressure_pde.getSolution()
-                        except RuntimeError, msg:
-                            print 'error, non-convergence'
-                            print msg
+                        except RuntimeError(msg):
+                            print('error, non-convergence')
+                            print(msg)
                             non_convergence = True
 
                         # remove inflow nodes again
@@ -1003,12 +1007,12 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                             seepage_array = np.array(
                                 active_seepage_bnd.toListOfTuples())
                             ind = seepage_array > 0
-                            print '\tafter 2nd adjustment (removing inflow nodes):'
-                            print '\tN=%i active seepage bnd from ' \
+                            print('\tafter 2nd adjustment (removing inflow nodes):')
+                            print('\tN=%i active seepage bnd from ' \
                                   'x=%0.0f to %0.0f m' \
                                   % (np.sum(ind.astype(int)),
                                      seepage_nodes_xy[ind, 0].min(),
-                                     seepage_nodes_xy[ind, 0].max())
+                                     seepage_nodes_xy[ind, 0].max()))
 
                 if iterate_seepage_in_one_timestep is True:
                     # assign updated seepage nodes:
@@ -1046,39 +1050,43 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
 
                     try:
                         pressure = pressure_pde.getSolution()
-                    except RuntimeError, msg:
-                        print 'error, non-convergence'
-                        print msg
+                    except RuntimeError(msg):
+                        print('error, non-convergence')
+                        print(msg)
                         non_convergence = True
 
         # calculate convergence criteria
         pressure_conv = pressure - pressure_old_iteration
-        conc_conv = concentration - concentration_old_iteration
+
+        if solute_transport is True:
+            conc_conv = concentration - concentration_old_iteration
+        else:
+            conc_conv = 0.0
 
         # check whether iterations have converged or not:
         if (es.Lsup(pressure_conv) < pressure_convergence_criterion) and \
                 (es.Lsup(conc_conv) < concentration_convergence_criterion)\
                 and iteration + 1 >= min_iterations:
             if iteration > 0 and verbose is True:
-                print 'iterations converged after %i iterations' % iteration
+                print('iterations converged after %i iterations' % iteration)
             converged = True
         else:
             if verbose is True:
-                print 'iteration %i, max. pressure change %0.3e ' \
-                      % (iteration, es.Lsup(pressure_conv))
-                print '              max. C change %0.3e ' \
-                      % (es.Lsup(conc_conv))
+                print('iteration %i, max. pressure change %0.3e ' \
+                      % (iteration, es.Lsup(pressure_conv)))
+                print('              max. C change %0.3e ' \
+                      % (es.Lsup(conc_conv)))
 
         if iteration + 1 >= max_iterations:
-            print 'warning, reached maximum number of %i iterations' \
-                  % (iteration + 1)
-            print 'iteration %i, max. pressure change %0.3e Pa, ' \
+            print('warning, reached maximum number of %i iterations' \
+                  % (iteration + 1))
+            print('iteration %i, max. pressure change %0.3e Pa, ' \
                   'convergence at %0.2e Pa' \
                   % (iteration, es.Lsup(pressure_conv),
-                     pressure_convergence_criterion)
-            print '              max. C change %0.3e kg/kg, ' \
+                     pressure_convergence_criterion))
+            print('              max. C change %0.3e kg/kg, ' \
                   'convergence at %0.2e kg/kg' \
-                  % (es.Lsup(conc_conv), concentration_convergence_criterion)
+                  % (es.Lsup(conc_conv), concentration_convergence_criterion))
             converged = True
             non_convergence = True
 
@@ -1092,8 +1100,8 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
         max_CFL_number = es.Lsup(CFL_number)
 
         if max_CFL_number > 0.5 and verbose is True:
-            print 'warning, max CFL number = %0.2f, exceeds 0.5' \
-                  % max_CFL_number
+            print('warning, max CFL number = %0.2f, exceeds 0.5' \
+                  % max_CFL_number)
 
         # recaclulcate timestep if max timestep exceeds CFL number
         if (max_allowed_CFL_number is not None
@@ -1114,9 +1122,9 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
             dt = new_timestep
 
             if verbose is True:
-                print 'max CFL number = ', max_CFL_number
-                print 'changing timestep from %0.2e sec to %0.2e sec' \
-                      % (dt, new_timestep)
+                print('max CFL number = ', max_CFL_number)
+                print('changing timestep from %0.2e sec to %0.2e sec' \
+                      % (dt, new_timestep))
 
         if coupled_iterations is False:
             converged = True

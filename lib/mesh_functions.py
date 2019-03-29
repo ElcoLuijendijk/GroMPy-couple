@@ -13,6 +13,7 @@ import esys.finley as fl
 import esys.escript as es
 
 
+
 def setup_coastal_mesh_glover1959(Parameters,
                                   mesh_filename):
     """
@@ -28,44 +29,56 @@ def setup_coastal_mesh_glover1959(Parameters,
     #    extent_salt_water = (Parameters.thickness /
     #                         (41.0 * Parameters.topo_gradient))
 
-    R = Parameters.recharge_flux
-    B = Parameters.thickness
-    K = Parameters.k * Parameters.rho_f_0 * 9.81 / Parameters.viscosity
-    L = Parameters.L
+    if Parameters.ghyben_herzberg is True:
 
-    # calculate hydraulic head using analytical solution for confined aq
-    # with uniform recharge + Dupuit assumptions
-    xa = np.linspace(0, L, 1001)
-    h = R / (K * B) * (L * xa - 0.5 * xa ** 2)
+        R = Parameters.recharge_flux
+        B = Parameters.thickness
+        K = Parameters.k * Parameters.rho_f_0 * 9.81 / Parameters.viscosity
+        L = Parameters.L
 
-    # calculate depth salt water interface
-    from grompy_lib import depth_sw_interface_Glover1959
+        # calculate hydraulic head using analytical solution for confined aq
+        # with uniform recharge + Dupuit assumptions
+        xa = np.linspace(0, L, 1001)
+        h = R / (K * B) * (L * xa - 0.5 * xa ** 2)
 
-    rho_f = Parameters.rho_f_0 * Parameters.freshwater_concentration * Parameters.gamma + Parameters.rho_f_0
-    rho_s = Parameters.rho_f_0 * Parameters.seawater_concentration * Parameters.gamma + Parameters.rho_f_0
 
-    Qmax = Parameters.recharge_flux * L
+        # calculate depth salt water interface
+        from grompy_lib import depth_sw_interface_Glover1959
 
-    y_sw, int_sw_top, int_sw_bottom = depth_sw_interface_Glover1959(xa, Parameters.k, Parameters.viscosity,
-                                                                    Parameters.topo_gradient, Parameters.thickness,
-                                                                    rho_f, rho_s, Qmax=Qmax)
+        rho_f = Parameters.rho_f_0 * Parameters.freshwater_concentration * Parameters.gamma + Parameters.rho_f_0
+        rho_s = Parameters.rho_f_0 * Parameters.seawater_concentration * Parameters.gamma + Parameters.rho_f_0
 
-    if int_sw_bottom > L:
-        print 'warning, calculated extent salt water toe exceeds model domain'
-        print 'calculated toe of fresh_salt water bnd = %0.2f m' % int_sw_bottom
-        extent_salt_water = Parameters.L - Parameters.buffer_distance_land - 1.0
-        print 'choosing maximum possible extent of %0.2f m  for ' \
-              'designing model grid' % extent_salt_water
+        Qmax = Parameters.recharge_flux * L
 
-        fine_mesh = False
-        # print 'entire landward side of model domain has fine discretization'
-        # fine_mesh = True
+        y_sw, int_sw_top, int_sw_bottom = depth_sw_interface_Glover1959(xa, Parameters.k, Parameters.viscosity,
+                                                                        Parameters.topo_gradient, Parameters.thickness,
+                                                                        rho_f, rho_s, Parameters.gamma,
+                                                                        Qmax=Qmax)
+
+        if Parameters.recharge_flux == 0.0:
+            # assume with no rehcarge that the hydraulic head follows the land surface
+            h = Parameters.topo_gradient * xa
+            #y_sw, int_sw_top, int_sw_bottom
+
+        if int_sw_bottom > L:
+            print 'warning, calculated extent salt water toe exceeds model domain'
+            print 'calculated toe of fresh_salt water bnd = %0.2f m' % int_sw_bottom
+            extent_salt_water = Parameters.L - Parameters.buffer_distance_land - 1.0
+            print 'choosing maximum possible extent of %0.2f m  for ' \
+                  'designing model grid' % extent_salt_water
+
+            fine_mesh = False
+
+        else:
+
+            fine_mesh = False
+            extent_salt_water = int_sw_bottom
+            print 'calculated extent salt water toe = %0.2f m' % int_sw_bottom
 
     else:
-
+        print 'assuming a vertical fresh-salt water interface'
+        extent_salt_water = 0.0
         fine_mesh = False
-        extent_salt_water = int_sw_bottom
-        print 'calculated extent salt water toe = %0.2f m' % int_sw_bottom
 
     L_land = Parameters.L
 
@@ -281,9 +294,9 @@ def setup_coastal_mesh(Parameters,
     # -line3 (pt 3 to 2)
     # - line7 (pt 2 to pt 5)
     # coastline to x=0, z=0
-    line14 = pc.Line(points[5], points[10])
+    #line14 = pc.Line(points[5], points[10])
     # x=0, z=0 to x=0, z=sea bottom
-    line15 = pc.Line(points[10], points[3])
+    #line15 = pc.Line(points[10], points[3])
     # coastline to x=0, sea bottom
 
     # finer grid cell size around fresh-salt water interface
@@ -292,20 +305,20 @@ def setup_coastal_mesh(Parameters,
     curve_c = pc.CurveLoop(line8, line9, line10, -line6)
     curve_d = pc.CurveLoop(line11, line12, line13, -line9)
 
-    curve_seawater = pc.CurveLoop(-line3, -line7, line14, line15)
+    #curve_seawater = pc.CurveLoop(-line3, -line7, line14, line15)
 
     surface_a = pc.PlaneSurface(curve_a)
     surface_b = pc.PlaneSurface(curve_b)
     surface_c = pc.PlaneSurface(curve_c)
     surface_d = pc.PlaneSurface(curve_d)
 
-    surface_seawater = pc.PlaneSurface(curve_seawater)
+    #surface_seawater = pc.PlaneSurface(curve_seawater)
 
     surface_a.setLocalScale(factor=Parameters.grid_refinement_factor_sea)
     surface_b.setLocalScale(factor=Parameters.grid_refinement_factor)
     surface_c.setLocalScale(factor=Parameters.grid_refinement_factor)
 
-    surface_seawater.setLocalScale(factor=Parameters.grid_refinement_factor_seawater)
+    #surface_seawater.setLocalScale(factor=Parameters.grid_refinement_factor_seawater)
 
     if fine_mesh is True:
         print 'assigning refined grid from landward side of model domain'
@@ -317,14 +330,20 @@ def setup_coastal_mesh(Parameters,
     ps2 = pc.PropertySet("sea_surface2", line7)
     ps3 = pc.PropertySet("land_surface1", line10)
     ps4 = pc.PropertySet("land_surface2", line13)
-    ps5 = pc.PropertySet("sea_surface", line14)
+    #ps5 = pc.PropertySet("sea_surface", line14)
+
+    #d.addItems(pc.PropertySet('sea', surface_a),
+    #           pc.PropertySet('salt_wedge_sea_side', surface_b),
+    #           pc.PropertySet('salt_wedge_land_side', surface_c),
+    #           pc.PropertySet('land', surface_d),
+    #           pc.PropertySet('seawater', surface_seawater),
+    #           ps1, ps2, ps3, ps4, ps5)
 
     d.addItems(pc.PropertySet('sea', surface_a),
                pc.PropertySet('salt_wedge_sea_side', surface_b),
                pc.PropertySet('salt_wedge_land_side', surface_c),
                pc.PropertySet('land', surface_d),
-               pc.PropertySet('seawater', surface_seawater),
-               ps1, ps2, ps3, ps4, ps5)
+               ps1, ps2, ps3, ps4)
 
     d.setMeshFileName(mesh_filename)
 
@@ -339,6 +358,8 @@ def setup_coastal_mesh(Parameters,
     sea_surface = es.whereZero(xy[1]) * es.whereNegative(xy[0])
 
     seawater = es.whereNegative(xy[0]) * es.whereNegative(z_surface - xy[1])
+
+    print bla
 
     return mesh, surface, sea_surface, seawater, z_surface
 

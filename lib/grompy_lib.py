@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 """
 supporting functions for Grompy
 
@@ -6,6 +8,7 @@ supporting functions for Grompy
 import os
 import math
 import itertools
+import pdb
 
 import numpy as np
 
@@ -15,7 +18,7 @@ try:
     import esys.escript as es
     import esys.weipa
 except ImportError:
-    print 'warning, could not find escript module'
+    print('warning, could not find escript module')
 
 
 def get_timestr(sec, limit_to_days=True):
@@ -272,7 +275,7 @@ def set_boundary_conditions(mesh, surface, sea_surface, z_surface, Parameters):
         rch_bnd_loc = rch_bnd_loc * es.wherePositive(xy_rch[0])
 
     except RuntimeError:
-        print 'could not set recharge bnd using tags, using location instead'
+        print('could not set recharge bnd using tags, using location instead')
         rch_bnd_loc = (es.whereNegative(Parameters.recharge_mass_flux_xmin -
                                         xy[0])
                        * es.wherePositive(Parameters.recharge_mass_flux_xmax -
@@ -280,11 +283,11 @@ def set_boundary_conditions(mesh, surface, sea_surface, z_surface, Parameters):
                        * es.wherePositive(surface))
 
     rch_xy, rch_array = convert_to_array(rch_bnd_loc)
-    print 'number of active recharge nodes = %i' % rch_array.sum()
+    print('number of active recharge nodes = %i' % rch_array.sum())
 
     #
     if Parameters.specified_concentration_surface is True:
-        print 'assigning specified concentration only to the surface up to x=0:'
+        print('assigning specified concentration only to the surface up to x=0:')
         if sea_surface is not None:
             specified_concentration_bnd = \
                 es.whereNegative(xy[0]) * sea_surface + es.whereNonNegative(xy[0]) * surface
@@ -304,8 +307,8 @@ def set_boundary_conditions(mesh, surface, sea_surface, z_surface, Parameters):
                                                              Parameters.specified_concentration_ymax,
                                                              Parameters.specified_concentration):
 
-            print 'assigning specified concentration of %0.4f at surface from x=%0.2f to %0.2f, y=%0.2f to %0.2f' % \
-                  (spec_conc_segment, xmin, xmax, ymin, ymax)
+            print('assigning specified concentration of %0.4f at surface from x=%0.2f to %0.2f, y=%0.2f to %0.2f' %
+                  (spec_conc_segment, xmin, xmax, ymin, ymax))
 
             specified_concentration_bnd_segment = (es.whereNonPositive(xmin - xy[0]) *
                                                    es.whereNonNegative(xmax - xy[0]) *
@@ -322,7 +325,7 @@ def set_boundary_conditions(mesh, surface, sea_surface, z_surface, Parameters):
     specified_concentration_rho_f = (specified_concentration *
                                      specified_concentration_rho)
     # set specified pressure boundary:
-    print 'setting specified pressure nodes at surface'
+    print('setting specified pressure nodes at surface')
     if Parameters.specified_pressure_surface is True:
         if sea_surface is not None:
             specified_pressure_bnd = \
@@ -334,9 +337,7 @@ def set_boundary_conditions(mesh, surface, sea_surface, z_surface, Parameters):
                 es.wherePositive(sea_surface)
         else:
             specified_pressure_bnd = \
-                es.whereNegative(Parameters.specified_pressure_xmin - xy[0]) * \
-                es.wherePositive(Parameters.specified_pressure_xmax - xy[0]) * \
-                es.wherePositive(surface)
+                es.whereNegative(Parameters.specified_pressure_xmin - xy[0]) * es.wherePositive(Parameters.specified_pressure_xmax - xy[0]) * es.wherePositive(surface)
 
         specified_pressure = (specified_pressure_bnd *
                       Parameters.specified_pressure)
@@ -351,8 +352,8 @@ def set_boundary_conditions(mesh, surface, sea_surface, z_surface, Parameters):
                                                                  Parameters.specified_pressure_ymax,
                                                                  Parameters.specified_pressure):
 
-            print 'assigning spec. pressure %0.3f to segment x=%0.3f-%0.3f, y=%0.3f-%0.3f' \
-                  % (spec_pressure_segment, xmin, xmax, ymin, ymax)
+            print('assigning spec. pressure %0.3f to segment x=%0.3f-%0.3f, y=%0.3f-%0.3f'
+                  % (spec_pressure_segment, xmin, xmax, ymin, ymax))
 
             spec_pressure_bound_segment = es.whereNonPositive(xmin - xy[0]) * es.whereNonNegative(xmax - xy[0]) * \
                                           es.whereNonPositive(ymin - xy[1]) * es.whereNonNegative(ymax - xy[1])
@@ -366,18 +367,18 @@ def set_boundary_conditions(mesh, surface, sea_surface, z_surface, Parameters):
             dPh = spec_pressure_bound_segment * es.wherePositive(d) * d * density_segment * Parameters.g
             specified_pressure += spec_pressure_bound_segment * dPh
 
-            print 'added hydrostatic pressure to this segment: ', dPh
-            print 'using density ', density_segment
-            print 'warning: this assumes constant density in the fluid column at this location'
-            print 'hydrostatic pressure bnd condition with varying concentration/density is not implemented yet'
+            print('added hydrostatic pressure to this segment: ', dPh)
+            print('using density ', density_segment)
+            print('warning: this assumes constant density in the fluid column at this location')
+            print('hydrostatic pressure bnd condition with varying concentration/density is not implemented yet')
 
     #
     sp_xy, spec_pressure_array = convert_to_array(specified_pressure_bnd)
-    print 'number of specified pressure bnd nodes: %i' % spec_pressure_array.sum()
+    print('number of specified pressure bnd nodes: %i' % spec_pressure_array.sum())
 
     if Parameters.add_seawater_pressure is True:
 
-        print 'adding pressure of overlying seawater to specified pressure boundary'
+        print('adding pressure of overlying seawater to specified pressure boundary')
 
         depth_under_sea = Parameters.sea_water_level - xy[1]
         sea_extent = es.whereNegative(z_surface - Parameters.sea_water_level)
@@ -387,23 +388,23 @@ def set_boundary_conditions(mesh, surface, sea_surface, z_surface, Parameters):
             depth_under_sea * Parameters.g * rho_f_salt)
         specified_pressure = specified_pressure + specified_pressure_seawater
 
-        print 'added pressure = ', specified_pressure_seawater
+        print('added pressure = ', specified_pressure_seawater)
 
-        print 'specified pressure sea bottom = ', specified_pressure * surface
+        print('specified pressure sea bottom = ', specified_pressure * surface)
 
         if sea_surface is not None:
-            print 'specified pressure sealevel = ', specified_pressure * sea_surface
+            print('specified pressure sealevel = ', specified_pressure * sea_surface)
 
     su_xy, su_array = convert_to_array(surface)
     spc_xy, spec_c_array = convert_to_array(specified_concentration_bnd)
-    print 'number of surface nodes = %i' % su_array.sum()
-    print 'number of specified concentration bnd nodes: %i' % \
-          spec_c_array.sum()
-    print 'specified concentration ', specified_concentration
+    print('number of surface nodes = %i' % su_array.sum())
+    print('number of specified concentration bnd nodes: %i' % \
+          spec_c_array.sum())
+    print('specified concentration ', specified_concentration)
     ind = spec_c_array == 1
     max_x_sc = np.max(spc_xy[:, 0][ind])
     min_x_sc = np.min(spc_xy[:, 0][ind])
-    print 'active from x = %0.1f to %0.1f ' % (min_x_sc, max_x_sc)
+    print('active from x = %0.1f to %0.1f ' % (min_x_sc, max_x_sc))
 
     return (specified_pressure, specified_pressure_bnd,
             specified_concentration,
@@ -411,32 +412,39 @@ def set_boundary_conditions(mesh, surface, sea_surface, z_surface, Parameters):
             rch_bnd_loc, drain_bnd_loc)
 
 
-def depth_sw_interface_Glover1959(x, k, viscosity, hydr_gradient, thickness, rho_f, rho_s, g=9.81, Qmax=None,
+def depth_sw_interface_Glover1959(x, k, viscosity, hydr_gradient, thickness, rho_f, rho_s, gamma,
+                                  g=9.81, Qmax=None,
                                   Q_correction_factor=0.5):
 
     """
     Calculate depth of the fresh-salt water interface in a coastal aquifer, following Glover (1959) JGR.
     """
 
-    K = k *  rho_f * g / viscosity
+    if hydr_gradient == 0.0:
+        hydr_gradient = 1e-4
+
+    K = k * rho_f * g / viscosity
 
     Q = K * thickness * hydr_gradient
 
     if Q_correction_factor is not None:
-        print 'correcting freshwater Q at shoreline by factor %0.2e to compensate for partitioning offshore ' \
-              'and onshore discharge' % Q_correction_factor
+        print('correcting freshwater Q at shoreline by factor %0.2e to compensate for partitioning offshore ' \
+              'and onshore discharge' % Q_correction_factor)
         Q = Q * Q_correction_factor
 
-    if Qmax is not None:
+    if Qmax is not None and Qmax > 0:
         if Q > Qmax:
-            print 'calculated Darcy flux at shoreline exceeds maximum Q (ie recharge input)'
-            print 'calculated = %0.2e m2/s' % Q
-            print 'max = %0.2e m2/s' % Qmax
-            print 'using max Q in calculation of fresh-salt water interface following Glover (1959)'
+            print('calculated Darcy flux at shoreline exceeds maximum Q (ie recharge input)')
+            print('calculated = %0.2e m2/s' % Q)
+            print('max = %0.2e m2/s' % Qmax)
+            print('using max Q in calculation of fresh-salt water interface following Glover (1959)')
 
             Q = Qmax
 
     gamma = (rho_s - rho_f) / rho_f
+
+    if gamma == 0:
+        gamma = (1025. - 998.7) / 998.7
 
     y2 = 2 * Q / (gamma * K) * x + Q**2 / (gamma**2 * K**2)
 
@@ -499,7 +507,7 @@ def set_initial_conditions(mesh, z_surface, seawater, Parameters):
     xy = mesh.getX()
 
     if Parameters.analytical_solution_initial_h is True:
-        print 'calculating initial hydraulic head using analytical solution'
+        print('calculating initial hydraulic head using analytical solution')
         # calculate initial hydraulic head using analytical solution
         R = Parameters.recharge_flux
         B = Parameters.thickness
@@ -518,7 +526,7 @@ def set_initial_conditions(mesh, z_surface, seawater, Parameters):
 
         z_surface = h_adj2
 
-        print 'analytical solution for initial h: ', h_adj
+        print('analytical solution for initial h: ', h_adj)
 
     depth = z_surface - xy[1]
     sea_extent = es.whereNegative(z_surface - Parameters.sea_water_level)
@@ -528,8 +536,8 @@ def set_initial_conditions(mesh, z_surface, seawater, Parameters):
     # assume Ghyben-Herzberg initial conditions with P=0 at surface elevation
     if Parameters.ghyben_herzberg is True:
         #print 'initial concentration follow Ghyben-Herzberg relation'
-        print 'new initial cond: fresh-salt water interface now calculated using analytical solution Glover (1959) JGR'
-        print 'still called Ghyben-Herzberg in input file though....'
+        print('new initial cond: fresh-salt water interface now calculated using analytical solution Glover (1959) JGR')
+        print('still called Ghyben-Herzberg in input file though....')
 
         old_style = False
         if old_style is True:
@@ -548,19 +556,20 @@ def set_initial_conditions(mesh, z_surface, seawater, Parameters):
                                                                             Parameters.viscosity,
                                                                             Parameters.topo_gradient,
                                                                             Parameters.thickness,
-                                                                            rho_f, rho_s, Qmax=Qmax)
+                                                                            rho_f, rho_s, Parameters.gamma,
+                                                                            Qmax=Qmax)
 
-            print 'elevation fresh-saltwater interface: ', y_sw
+            print('elevation fresh-saltwater interface: ', y_sw)
 
             conc0 = es.whereNegative(xy[1] - y_sw) * Parameters.seawater_concentration
             conc0 += es.whereNonNegative(xy[1] - y_sw) * Parameters.freshwater_concentration
 
-            print 'initial concentration: ', conc0
+            print('initial concentration: ', conc0)
 
     else:
         # TODO: make this a bit less ugly:
-        conc0 = (es.wherePositive(xy[1] + 1e6) *
-                 Parameters.freshwater_concentration)
+        conc0 = es.wherePositive(xy[0]) * Parameters.freshwater_concentration
+        conc0 += es.whereNonPositive(xy[0]) * Parameters.seawater_concentration
 
     # make sure seawater salinity at sea:
     if seawater is not None:
@@ -571,20 +580,19 @@ def set_initial_conditions(mesh, z_surface, seawater, Parameters):
                                                     Parameters.gamma,
                                                     Parameters.rho_f_0)
 
-    rho_f_salt = gwflow_lib.calculate_fluid_density(
-        Parameters.seawater_concentration,
-        Parameters.gamma,
-        Parameters.rho_f_0)
+    rho_f_salt = gwflow_lib.calculate_fluid_density(Parameters.seawater_concentration,
+                                                    Parameters.gamma,
+                                                    Parameters.rho_f_0)
 
     # set initial hydrostatic pressure
     pressure0 = rho_f_init * Parameters.g * depth
 
     # add pressure of overlying seawater under the sea
     if Parameters.add_seawater_pressure is True:
-        print 'adding pressure of seawater to initial conditions'
-        pressure0_adj = (pressure0 +
-                         sea_extent *
-                         (depth_under_sea * Parameters.g * rho_f_salt))
+        print('adding pressure of seawater to initial conditions')
+        additional_pressure = sea_extent * (depth_under_sea * Parameters.g * rho_f_salt)
+        print('additional pressure = ', additional_pressure)
+        pressure0_adj = pressure0 + additional_pressure
     else:
         pressure0_adj = pressure0
 
@@ -620,39 +628,55 @@ def run_model_scenario(scenario_name,
 
     # setup model
     # set up mesh
-    print 'creating mesh'
+    print('creating mesh')
     #mesh, surface, z_surface = mesh_function(Parameters, mesh_fn)
     mesh, surface, sea_surface, seawater, z_surface = mesh_function(Parameters,
                                                                     mesh_fn)
 
-    print 'set up PDEs'
+    print('set up PDEs')
     pressure_pde = es.linearPDEs.LinearPDE(mesh)
     solute_pde = es.linearPDEs.LinearPDE(mesh)
 
     pressure_pde.setSymmetryOn()
     solute_pde.setSymmetryOn()
 
+    #pressure_pde.setReducedOrderOn()
+
     # set direct solver for pressure transport
     if ModelOptions.pressure_transport_solver is 'GMRES':
-        print 'using GMRES solver for pressure PDE'
+        print('using GMRES solver for pressure PDE')
         pressure_pde.getSolverOptions().setSolverMethod(es.SolverOptions.GMRES)
     elif ModelOptions.pressure_transport_solver is 'DIRECT':
-        print 'using direct solver for pressure PDE'
+        print('using direct solver for pressure PDE')
         pressure_pde.getSolverOptions().setSolverMethod(
             es.SolverOptions.DIRECT)
+    elif ModelOptions.pressure_transport_solver is 'PCG':
+        print('using PCG solver for pressure PDE')
+        pressure_pde.getSolverOptions().setSolverMethod(
+            es.SolverOptions.PCG)
+    elif ModelOptions.pressure_transport_solver is 'TFQMR':
+        print('using TFQMR solver for pressure PDE')
+        pressure_pde.getSolverOptions().setSolverMethod(
+            es.SolverOptions.TFQMR)
 
     # set direct solver for solute transport
     if ModelOptions.solute_transport_solver is 'GMRES':
-        print 'using GMRES solver for solute PDE'
+        print('using GMRES solver for solute PDE')
         solute_pde.getSolverOptions().setSolverMethod(es.SolverOptions.GMRES)
     elif ModelOptions.solute_transport_solver is 'DIRECT':
-        print 'using direct solver for solute PDE'
+        print('using direct solver for solute PDE')
         solute_pde.getSolverOptions().setSolverMethod(es.SolverOptions.DIRECT)
+    elif ModelOptions.solute_transport_solver is 'PCG':
+        print('using PCG solver for solute PDE')
+        solute_pde.getSolverOptions().setSolverMethod(es.SolverOptions.PCG)
+    elif ModelOptions.solute_transport_solver is 'PCG':
+        print('using TFQMR solver for solute PDE')
+        solute_pde.getSolverOptions().setSolverMethod(es.SolverOptions.TFQMR)
 
     # set gravity vector
     g_vector = es.Vector((0, -g), es.Function(mesh))
 
-    print 'set up boundary conditions'
+    print('set up boundary conditions')
     #(specified_pressure, specified_pressure_bnd,
     # specified_concentration, specified_concentration_rho_f,
     # specified_concentration_bnd, rch_bnd_loc, drain_bnd_loc) = \
@@ -663,7 +687,7 @@ def run_model_scenario(scenario_name,
         set_boundary_conditions(mesh, surface, sea_surface, z_surface,
                                 Parameters)
 
-    print 'set up initial conditions'
+    print('set up initial conditions')
     if Parameters.mesh_type is 'coastal':
         pressure0, conc0, rho_f_init = set_initial_conditions(mesh,
                                                               z_surface,
@@ -690,15 +714,22 @@ def run_model_scenario(scenario_name,
     output_step = 0
 
     # set bnd conditions
-    print 'setting boundary conditions'
+    print('setting boundary conditions')
 
     # calculate recharge mass flux
     recharge_mass_flux = (Parameters.recharge_flux *
                           Parameters.recharge_density)
 
     specified_flux = rch_bnd_loc * dt * recharge_mass_flux
-    pressure_pde.setValue(D=1, r=specified_pressure, q=specified_pressure_bnd,
-                          y=specified_flux)
+
+    #if specified_pressure.getShape() == (1L,) or specified_pressure_bnd.getShape() == (1L,):
+    #    msg = 'error, the specified pressure bnd parameter has the wrong shape.'
+    #    msg += 'Most likely either the variable specified_pressure or specified_pressure_xmin in your input file '
+    #    msg += 'is a list instead of a single number. When specified_pressure_surface = True these values should be ' \
+    #           'floats instead of lists'
+    #    raise ValueError(msg)
+
+    pressure_pde.setValue(D=1, r=specified_pressure, q=specified_pressure_bnd, y=specified_flux)
 
     # create PDE to project element values to nodes:
     proj = es.linearPDEs.LinearPDESystem(mesh)
@@ -746,8 +777,8 @@ def run_model_scenario(scenario_name,
     # initial steady state run
     if ModelOptions.initial_steady_state_run is True:
 
-        print '-' * 30
-        print 'running initial steady state model'
+        print('-' * 30)
+        print('running initial steady state model')
 
         #pressure = gwflow_lib.solve_steady_state_pressure_eq(
         #    mesh, pressure_pde,
@@ -773,6 +804,7 @@ def run_model_scenario(scenario_name,
                 rho_f_init,
                 proj)
 
+
     # screen output for initial conditions
     q = pressure_pde.getFlux()
     ext_surf = es.integrate(surface,
@@ -782,20 +814,24 @@ def run_model_scenario(scenario_name,
     xy = pressure.getFunctionSpace().getX()
     h = pressure / (rho_f * g) + xy[1]
 
-    print '-' * 30
-    print 'initial conditions:'
-    print 'pressure      ', pressure
-    print 'h             ', h
-    print 'concentration ', conc
-    print 'flux          ', q * year
-    print 'extent surface              ', ext_surf
-    print 'extent active seepage bnd   ', ext_seepage
+    # save mesh figure
+    #pdb.set_trace()
 
-    print '\n'
+
+    print('-' * 30)
+    print('initial conditions:')
+    print('pressure      ', pressure)
+    print('h             ', h)
+    print('concentration ', conc)
+    print('flux          ', q * year)
+    print('extent surface              ', ext_surf)
+    print('extent active seepage bnd   ', ext_seepage)
+
+    print('\n')
 
     ######################################
-    print '-' * 30
-    print 'starting transient iterations'
+    print('-' * 30)
+    print('starting transient iterations')
 
     reached_steady_state = False
     n_iterations = 0
@@ -821,8 +857,8 @@ def run_model_scenario(scenario_name,
         #                 (number_of_steps, total_steps, n_iterations))
         #sys.stdout.flush()
         timestr = get_timestr(runtime)
-        print 'timestep = %i, t=%0.2e / %0.2e, %s, iterations=%i, max CFL=%0.2e' \
-              % (number_of_steps, runtime, Parameters.total_time, timestr, n_iterations, max_CFL_number)
+        print('timestep = %i, t=%0.2e / %0.2e, %s, iterations=%i, max CFL=%0.2e'
+              % (number_of_steps, runtime, Parameters.total_time, timestr, n_iterations, max_CFL_number))
         # store data at old timestep:
         pressure_t1 = pressure
         concentration_t1 = conc
@@ -842,9 +878,16 @@ def run_model_scenario(scenario_name,
         if (seepage_step == True or
                 number_of_steps < Parameters.seepage_bnd_timestep_interval):
             recalculate_seepage_bnd = True
-            #print 'recalculating seepage bnd'
+            #print('recalculating seepage bnd'
         if runtime > Parameters.seepage_bnd_max_time:
             recalculate_seepage_bnd = False
+
+        # ignore convergence criterion for the first 20 timesteps
+        # for some reason low-flux / low-k models have convergence problems initially
+        if number_of_steps < 20:
+            ignore_convergence_failure = True
+        else:
+            ignore_convergence_failure = False
 
         # iterate
         (pressure, conc, rho_f, viscosity, q, q_abs,
@@ -900,17 +943,20 @@ def run_model_scenario(scenario_name,
                 force_CFL_timestep=Parameters.force_CFL_timestep,
                 dt_max=Parameters.dt_max,
                 iterate_seepage_in_one_timestep=
-                Parameters.iterate_seepage_in_one_timestep)
+                Parameters.iterate_seepage_in_one_timestep,
+                calculate_viscosity=Parameters.calculate_viscosity,
+                verbose=ModelOptions.verbose,
+                ignore_convergence_failure=ignore_convergence_failure)
 
         #except RuntimeError, msg:
         #    model_error = True
-        #    print 'solver failed, stopping this particular model scenario'
+        #    print('solver failed, stopping this particular model scenario'
         #    print msg
 
         if non_convergence is True:
             model_error = True
             go = False
-            print 'non convergence, stopping this particular model scenario'
+            print('non convergence, stopping this particular model scenario')
 
         # show iteration on screen
         #sys.stdout.write('%i / %i\r' % (number_of_steps + 1, total_steps))
@@ -942,23 +988,27 @@ def run_model_scenario(scenario_name,
                 and model_error is False
                 and runtime >= Parameters.total_time):
 
-            print 'reached steady state at timestep %i' % number_of_steps
-            print 'max abs. pressure change per year %0.2f' % \
-                  es.Lsup(pressure_difference)
-            print 'max abs. concentration change per year %0.2f' % \
-                  es.Lsup(concentration_difference)
+            print('reached steady state at timestep %i' % number_of_steps)
+            print('max abs. pressure change per year %0.2f' %
+                  es.Lsup(pressure_difference))
+            print('max abs. concentration change per year %0.2f' %
+                  es.Lsup(concentration_difference))
             reached_steady_state = True
             go = False
-
+        else:
+            #print('no steady state yet'
+            #print('max abs. pressure change per year %0.2f' % \
+            #      es.Lsup(pressure_difference)
+            pass
         # check if runtime exceeds max runtime
         if Parameters.stop_when_steady_state is False and runtime >= Parameters.total_time:
-            print 'exceeded runtime of ', Parameters.total_time
+            print('exceeded runtime of ', Parameters.total_time)
             go = False
 
         if Parameters.stop_when_steady_state is True and (runtime >= Parameters.max_runtime
                                                           or number_of_steps >= Parameters.max_timesteps):
-            print 'exceeded maximum runtime without reaching steady state'
-            print 'max runtime = ', Parameters.max_runtime
+            print('exceeded maximum runtime without reaching steady state')
+            print('max runtime = ', Parameters.max_runtime)
             go = False
 
         # give output to screen at regular interval or after last timestep
@@ -966,7 +1016,7 @@ def run_model_scenario(scenario_name,
                 or runtime == dt_real
                 or go is False):
 
-            print ''
+            print('')
 
             # reset output time counter
             if runtime != dt_real:
@@ -974,28 +1024,28 @@ def run_model_scenario(scenario_name,
 
             timestr = get_timestr(runtime)
 
-            print 'model scenario: %s / %s' % (str(scenario_name), model_file_adj)
-            print '\ntimestep %i, t = %i sec, (%s)' \
-                  % (number_of_steps + 1, runtime, timestr)
-            print 'number of iterations: %i' % n_iterations
-            print 'pressure iteration error = %0.3e (Pa)' % pressure_error
-            print 'concentration iteration error = %0.3e (kg/kg)' \
-                  % concentration_error
-            print 'max CFL number = %0.2f' % max_CFL_number
-            print 'timestep size = %0.2e sec or %0.2e days' \
-                  % (dt_real, dt_real / (24 * 60 * 60.0))
+            print('model scenario: %s / %s' % (str(scenario_name), model_file_adj))
+            print('\ntimestep %i, t = %i sec, (%s)' \
+                  % (number_of_steps + 1, runtime, timestr))
+            print('number of iterations: %i' % n_iterations)
+            print('pressure iteration error = %0.3e (Pa)' % pressure_error)
+            print('concentration iteration error = %0.3e (kg/kg)' \
+                  % concentration_error)
+            print('max CFL number = %0.2f' % max_CFL_number)
+            print('timestep size = %0.2e sec or %0.2e days' \
+                  % (dt_real, dt_real / (24 * 60 * 60.0)))
 
-            print '\nmodel variables:\n'
-            print 'pressure (Pa)               ', pressure
-            print 'concentration (kg/kg)       ', conc
-            print 'fluid density (kg/m^3)      ', rho_f
-            print 'qh (m/yr)                   ', q[0] * year
-            print 'qv (m/yr)                   ', q[1] * year
-            print 'pressure at surface         ', pressure * surface
-            print 'concentration at surface    ', conc * surface
-            print 'qv at surface (m/yr)        ', q[1] * surface * year
-            print 'P change per year (Pa)    ', pressure_difference
-            print 'C change per year (kg/kg) ', concentration_difference
+            print('\nmodel variables:\n')
+            print('pressure (Pa)               ', pressure)
+            print('concentration (kg/kg)       ', conc)
+            print('fluid density (kg/m^3)      ', rho_f)
+            print('qh (m/yr)                   ', q[0] * year)
+            print('qv (m/yr)                   ', q[1] * year)
+            print('pressure at surface         ', pressure * surface)
+            print('concentration at surface    ', conc * surface)
+            print('qv at surface (m/yr)        ', q[1] * surface * year)
+            print('P change per year (Pa)    ', pressure_difference)
+            print('C change per year (kg/kg) ', concentration_difference)
 
             # calculate hydraulic head
             xy = pressure.getFunctionSpace().getX()
@@ -1140,32 +1190,32 @@ def run_model_scenario(scenario_name,
             min_submarine_flux = es.inf(submarine_flux[1])
             max_submarine_flux = es.sup(submarine_flux[1])
 
-            print 'extent surface               ', ext_surf
-            print 'extent active seepage bnd    ', ext_seepage
-            print 'extent active recharge bnd   ', ext_rch
-            print 'total flux over surface      ', total_flux_over_surface
-            print 'total flux normal to surface ', total_flux_over_surface_norm
-            print 'total active recharche flux  ', total_rch_flux
-            print 'total active seepage flux    ', total_seepage_flux
-            print 'total land flux in           ', total_land_flux_in
-            print 'total land flux out          ', total_land_flux_out
-            print 'total submarine bnd flux     ', total_submarine_flux
-            print 'total submarine bnd flux in  ', total_submarine_flux_in
-            print 'total submarine bnd flux out ', total_submarine_flux_out
-            print 'extent inflow                ', ext_inflow
-            print 'extent outflow               ', ext_outflow
-            print 'extent inflow land           ', ext_inflow_land
-            print 'extent outflow land          ', ext_outflow_land
-            print 'extent inflow sea            ', ext_inflow_sea
-            print 'extent outflow sea           ', ext_outflow_sea
-            print 'extent outflow land > threshold ', ext_outflow_land_threshold
-            print 'extent outflow sea  > threshold ', ext_outflow_sea_threshold
-            print 'min land bnd flux             ', min_land_flux
-            print 'max land bnd flux             ', max_land_flux
-            print 'min seepage bnd flux          ', min_seepage_flux
-            print 'max seepage bnd flux          ', max_seepage_flux
-            print 'min submarine bnd flux        ', min_submarine_flux
-            print 'max submarine bnd flux        ', max_submarine_flux
+            print('extent surface               ', ext_surf)
+            print('extent active seepage bnd    ', ext_seepage)
+            print('extent active recharge bnd   ', ext_rch)
+            print('total flux over surface      ', total_flux_over_surface)
+            print('total flux normal to surface ', total_flux_over_surface_norm)
+            print('total active recharche flux  ', total_rch_flux)
+            print('total active seepage flux    ', total_seepage_flux)
+            print('total land flux in           ', total_land_flux_in)
+            print('total land flux out          ', total_land_flux_out)
+            print('total submarine bnd flux     ', total_submarine_flux)
+            print('total submarine bnd flux in  ', total_submarine_flux_in)
+            print('total submarine bnd flux out ', total_submarine_flux_out)
+            print('extent inflow                ', ext_inflow)
+            print('extent outflow               ', ext_outflow)
+            print('extent inflow land           ', ext_inflow_land)
+            print('extent outflow land          ', ext_outflow_land)
+            print('extent inflow sea            ', ext_inflow_sea)
+            print('extent outflow sea           ', ext_outflow_sea)
+            print('extent outflow land > threshold ', ext_outflow_land_threshold)
+            print('extent outflow sea  > threshold ', ext_outflow_sea_threshold)
+            print('min land bnd flux             ', min_land_flux)
+            print('max land bnd flux             ', max_land_flux)
+            print('min seepage bnd flux          ', min_seepage_flux)
+            print('max seepage bnd flux          ', max_seepage_flux)
+            print('min submarine bnd flux        ', min_submarine_flux)
+            print('max submarine bnd flux        ', max_submarine_flux)
 
             #####################
             # boundary conditions
@@ -1224,7 +1274,7 @@ def run_model_scenario(scenario_name,
                 flux_surface_plot = \
                     nodal_flux * surface + nodata * es.whereZero(surface)
 
-                print 'saving %s' % fn_vtk
+                print('saving %s' % fn_vtk)
 
                 if sea_surface is None:
                     sea_surface_save = surface
@@ -1250,16 +1300,17 @@ def run_model_scenario(scenario_name,
                                    active_concentration_bnd=active_concentration_bnd,
                                    flux_surface_norm=flux_surface_norm)
 
-            print '\ncontinuing iterations\n'
+            print('\ncontinuing iterations\n')
             # add increment to output step counter
             output_step += 1
 
         # adjust timestep
         # check if timestep was changed for CFL criterion
-        if dt == dt_real:
-            dt = dt * Parameters.dt_inc
-        elif Parameters.force_CFL_timestep is False:
-            dt = dt_real * Parameters.dt_inc
+        if number_of_steps > 25:
+            if dt == dt_real:
+                dt = dt * Parameters.dt_inc
+            elif Parameters.force_CFL_timestep is False:
+                dt = dt_real * Parameters.dt_inc
 
         if dt > Parameters.dt_max:
             dt = Parameters.dt_max
