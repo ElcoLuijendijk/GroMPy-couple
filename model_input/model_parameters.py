@@ -11,6 +11,8 @@ class ModelOptions():
     Class containing various model options.
     """
 
+    verbose = False
+
     # flag to run single or multiple model scenarios
     run_multiple_scenarios = True
 
@@ -323,6 +325,7 @@ class ModelParameters(dict):
     # note, grompy can also automatically calculate viscosity from concentration and temperature data following
     # Batzle and Wang (1992). This option is controlled by calculate_viscosity in the iterate_coupled_flow_eqs function
     # in the module gwflow_lib
+    calculate_viscosity = False
     viscosity = 8.94e-4
     reference_porosity = 0.25  # (non dimensional)
     reference_density = 1000.0  # [kg m-3]
