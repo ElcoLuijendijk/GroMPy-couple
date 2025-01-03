@@ -1,4 +1,4 @@
-from __future__ import print_function
+
 
 """
 Read a a VTK (.vtu) file of an unstructured grid and return arrays of the variables

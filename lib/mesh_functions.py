@@ -43,7 +43,7 @@ def setup_coastal_mesh_glover1959(Parameters,
 
 
         # calculate depth salt water interface
-        from grompy_lib import depth_sw_interface_Glover1959
+        from .grompy_lib import depth_sw_interface_Glover1959
 
         rho_f = Parameters.rho_f_0 * Parameters.freshwater_concentration * Parameters.gamma + Parameters.rho_f_0
         rho_s = Parameters.rho_f_0 * Parameters.seawater_concentration * Parameters.gamma + Parameters.rho_f_0
@@ -61,11 +61,11 @@ def setup_coastal_mesh_glover1959(Parameters,
             #y_sw, int_sw_top, int_sw_bottom
 
         if int_sw_bottom > L:
-            print 'warning, calculated extent salt water toe exceeds model domain'
-            print 'calculated toe of fresh_salt water bnd = %0.2f m' % int_sw_bottom
+            print('warning, calculated extent salt water toe exceeds model domain')
+            print('calculated toe of fresh_salt water bnd = %0.2f m' % int_sw_bottom)
             extent_salt_water = Parameters.L - Parameters.buffer_distance_land - 1.0
-            print 'choosing maximum possible extent of %0.2f m  for ' \
-                  'designing model grid' % extent_salt_water
+            print('choosing maximum possible extent of %0.2f m  for ' \
+                  'designing model grid' % extent_salt_water)
 
             fine_mesh = False
 
@@ -73,10 +73,10 @@ def setup_coastal_mesh_glover1959(Parameters,
 
             fine_mesh = False
             extent_salt_water = int_sw_bottom
-            print 'calculated extent salt water toe = %0.2f m' % int_sw_bottom
+            print('calculated extent salt water toe = %0.2f m' % int_sw_bottom)
 
     else:
-        print 'assuming a vertical fresh-salt water interface'
+        print('assuming a vertical fresh-salt water interface')
         extent_salt_water = 0.0
         fine_mesh = False
 
@@ -136,7 +136,7 @@ def setup_coastal_mesh_glover1959(Parameters,
     surface_c.setLocalScale(factor=Parameters.grid_refinement_factor)
 
     if fine_mesh is True:
-        print 'assigning refined grid to entire landward side of model domain'
+        print('assigning refined grid to entire landward side of model domain')
         surface_d.setLocalScale(factor=Parameters.grid_refinement_factor)
 
     d = gmsh.Design(dim=2, element_size=Parameters.cellsize)
@@ -154,7 +154,7 @@ def setup_coastal_mesh_glover1959(Parameters,
 
     d.setMeshFileName(mesh_filename)
 
-    print '=' * 30
+    print('=' * 30)
 
     mesh = fl.MakeDomain(d, optimizeLabeling=True)
 
@@ -199,17 +199,17 @@ def setup_coastal_mesh(Parameters,
     h = R / (K * B) * (L * xa - 0.5 * xa**2)
 
     if h[-1] < (B / 40):
-        print 'warning, calculated extent salt water toe exceeds model domain'
-        print 'calculated h at model bnd = %0.2f m' % h[-1]
-        print 'Ghyben-Herzberg depth of salt water interface = %0.2f m' % (h[-1] * 40)
-        print 'thickness = %0.2f m' % Parameters.thickness
+        print('warning, calculated extent salt water toe exceeds model domain')
+        print('calculated h at model bnd = %0.2f m' % h[-1])
+        print('Ghyben-Herzberg depth of salt water interface = %0.2f m' % (h[-1] * 40))
+        print('thickness = %0.2f m' % Parameters.thickness)
 
         if extend_domain is False:
             extent_salt_water = Parameters.L - Parameters.buffer_distance_land - 1.0
             #print 'choosing maximum possible extent of %0.2f m  for ' \
             #      'designing model grid' % extent_salt_water
 
-            print 'entire top right triangle at landward side of model domain has fine discretization'
+            print('entire top right triangle at landward side of model domain has fine discretization')
             fine_mesh = True
             adjust_length = False
         else:
@@ -230,7 +230,7 @@ def setup_coastal_mesh(Parameters,
         hs1 = R / (K * B) * (L * extent_salt_water -
                              0.5 * extent_salt_water**2)
 
-        print 'calculated extent salt water toe = %0.2f m' % extent_salt_water
+        print('calculated extent salt water toe = %0.2f m' % extent_salt_water)
 
         try:
             assert np.abs(hs1 - B / 40.0) < 1e-3
@@ -245,7 +245,7 @@ def setup_coastal_mesh(Parameters,
             L_land = Parameters.L
             fine_mesh = True
         else:
-            print 'extending model domain size to %0.3e' % L_land
+            print('extending model domain size to %0.3e' % L_land)
     else:
         L_land = Parameters.L
 
@@ -321,7 +321,7 @@ def setup_coastal_mesh(Parameters,
     #surface_seawater.setLocalScale(factor=Parameters.grid_refinement_factor_seawater)
 
     if fine_mesh is True:
-        print 'assigning refined grid from landward side of model domain'
+        print('assigning refined grid from landward side of model domain')
         surface_d.setLocalScale(factor=Parameters.grid_refinement_factor)
 
     d = gmsh.Design(dim=2, element_size=Parameters.cellsize)
@@ -359,7 +359,7 @@ def setup_coastal_mesh(Parameters,
 
     seawater = es.whereNegative(xy[0]) * es.whereNegative(z_surface - xy[1])
 
-    print bla
+    print(bla)
 
     return mesh, surface, sea_surface, seawater, z_surface
 

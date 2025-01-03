@@ -53,9 +53,9 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     run_id = 'S%i' % run
     #scenario_name = run_id
 
-    print '-' * 30
-    print 'model scenario id %s, run %i of %i' % (run_id, run + 1, nscenarios)
-    print '-' * 30
+    print('-' * 30)
+    print('model scenario id %s, run %i of %i' % (run_id, run + 1, nscenarios))
+    print('-' * 30)
 
     model_file_adj += 'run%s' % run_id
 
@@ -67,10 +67,10 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
             # find model parameter name to adjust
             model_param_name = scenario_param_name[:-2]
 
-            print 'updating parameter %s from %s to %s' \
+            print('updating parameter %s from %s to %s' \
                   % (model_param_name,
                      str(getattr(Parameters, model_param_name)),
-                     str(scenario_parameter))
+                     str(scenario_parameter)))
 
             # update model parameter
             setattr(Parameters, model_param_name, scenario_parameter)
@@ -78,8 +78,12 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
             # and add model param name to filename
             model_file_adj += '_%s_%s' % (model_param_name, str(scenario_parameter))
 
-    # set filename for mesh
+    # check if model output folder exists and create if not
+    if not os.path.exists(model_output_folder):
+        print(f"creating new directory for {model_output_folder} for model output")
+        os.makedirs(model_output_folder)
 
+    # set filename for mesh
     mesh_fn = os.path.join(scriptdir,
                            'model_output',
                            '_%i_%s.msh' % (random.randint(0, 100), '%s.msh' % scenario_name))
@@ -135,7 +139,7 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     runtime = end_time - start_time
     df.ix[run, 'computing_runtime_sec'] = runtime.total_seconds()
 
-    print 'processing model results'
+    print('processing model results')
     # get model results
     (mesh, surface, sea_surface, k_vector, P, Conc,
      rho_f, viscosity, h, q, q_abs, nodal_flux,
@@ -258,10 +262,6 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     df.ix[run, 'min_submarine_flux'] = min_submarine_flux
     df.ix[run, 'max_submarine_flux'] = max_submarine_flux
 
-    # check if model output folder exists and create if not
-    if not os.path.exists(model_output_folder):
-        os.makedirs(model_output_folder)
-
     # save model output to vtk file
     if ModelOptions.save_vtk_files is True:
         vtk_folder = os.path.join(model_output_folder, 'vtk_files')
@@ -271,7 +271,7 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
 
         fn_VTK = os.path.join(vtk_folder,
                               '%s_final_output.vtu' % model_file_adj)
-        print 'saving vtk file of model results: %s' % fn_VTK
+        print('saving vtk file of model results: %s' % fn_VTK)
 
         nodata = -99999
         flux_surface_plot = nodal_flux * surface + \
@@ -329,7 +329,7 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
             for x, y, vai in zip(xya[:, 0], xya[:, 1], va):
                 csv_str += '%0.3f,%0.3f,%0.3e\n' % (x, y, vai)
 
-            print 'writing final variable %s to file %s' % (varlabel, filename)
+            print('writing final variable %s to file %s' % (varlabel, filename))
 
             fout = open(filename, 'w')
             fout.write(csv_str)
@@ -363,7 +363,7 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     filename = os.path.join(diff_folder,
                             'P_and_C_changes_%s_final.csv' % model_file_adj)
 
-    print 'saving P and C changes to %s' % filename
+    print('saving P and C changes to %s' % filename)
     df_diff.to_csv(filename, index_label='timestep')
 
     # merge new model results dataframe with existing model output, if any
@@ -385,9 +385,9 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     if os.path.exists(filename):
         backup_filename = filename + '_backup'
         os.rename(filename, backup_filename)
-        print 'moved previous input & output data to %s' % backup_filename
+        print('moved previous input & output data to %s' % backup_filename)
 
-    print 'saving model run input & output data to %s' % filename
+    print('saving model run input & output data to %s' % filename)
     dfm.to_csv(filename, index_label='model_run')
 
     return df
@@ -402,7 +402,7 @@ def main():
 
     scriptdir = os.path.dirname(os.path.realpath(__file__))
 
-    print ''
+    print('')
 
 
     if len(sys.argv) > 1 and sys.argv[-1][-14:] != 'grompy.py':
@@ -411,7 +411,7 @@ def main():
         #                                     scenario_name)
         inp_file_loc = os.path.join(scriptdir, sys.argv[-1])
 
-        print 'model input files: ', inp_file_loc
+        print('model input files: ', inp_file_loc)
 
         try:
             model_parameters = imp.load_source('model_parameters', inp_file_loc)
@@ -425,8 +425,8 @@ def main():
 
     else:
 
-        print 'running model input data from file ' \
-              'model_input/model_parameters.py'
+        print('running model input data from file ' \
+              'model_input/model_parameters.py')
 
         from model_input.model_parameters import ModelParameters, ModelOptions
         from model_input.model_parameters import ParameterRanges
@@ -443,9 +443,9 @@ def main():
         mesh_function = mesh_functions.setup_rectangular_mesh
 
     # run multiple model scenarios
-    print '=' * 35
-    print 'running model scenarios:'
-    print '=' * 35
+    print('=' * 35)
+    print('running model scenarios:')
+    print('=' * 35)
 
     # select folder to save results
     model_output_folder = ModelOptions.model_output_dir
@@ -467,9 +467,9 @@ def main():
             latest_output_file = os.path.join(model_output_folder,
                                               output_files[-1][1])
 
-            print 'found existing model runs file %s in folder %s' \
-                  % (latest_output_file, model_output_folder)
-            print 'will append new model results'
+            print('found existing model runs file %s in folder %s' \
+                  % (latest_output_file, model_output_folder))
+            print('will append new model results')
 
             dfo = pd.read_csv(latest_output_file)
 
@@ -478,7 +478,7 @@ def main():
             firstrun_str = [f for f in firstrun_lst if str(f)[0] == 'S'][-1]
             firstrun = int(firstrun_str[1:]) + 1
 
-            print 'numbering new model runs starting at %i' % firstrun
+            print('numbering new model runs starting at %i' % firstrun)
 
     if ModelOptions.model_scenario_list is not 'file':
 
@@ -577,7 +577,7 @@ def main():
 
     #pl.close('all')
 
-    print 'done'
+    print('done')
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-from __future__ import print_function
+
 
 """
 functions to solve groundwater flow, solute transport and heat
@@ -689,7 +689,7 @@ def iterate_coupled_flow_eqs(mesh, topo_gradient, pressure_pde, solute_pde,
                             toListOfTuples())))
 
                 if verbose is True:
-                    import grompy_lib
+                    from . import grompy_lib
 
                     xyi, ia = grompy_lib.convert_to_array(
                         active_specified_concentration_bnd)

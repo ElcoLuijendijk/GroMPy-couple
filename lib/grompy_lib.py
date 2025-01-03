@@ -1,4 +1,4 @@
-from __future__ import print_function
+
 
 """
 supporting functions for Grompy
@@ -12,7 +12,7 @@ import pdb
 
 import numpy as np
 
-import gwflow_lib
+import lib.gwflow_lib as gwflow_lib
 
 try:
     import esys.escript as es

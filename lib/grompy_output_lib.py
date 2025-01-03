@@ -1,4 +1,4 @@
-from __future__ import print_function
+
 
 
 """
@@ -8,8 +8,8 @@ from __future__ import print_function
 import os
 import numpy as np
 
-import read_vtu_file
-from grompy_lib import get_normal_flux_to_bnd
+from . import read_vtu_file
+from .grompy_lib import get_normal_flux_to_bnd
 
 
 def get_vtk_files(base_dir, argv=[''], folder=None):
@@ -44,7 +44,7 @@ def get_vtk_files(base_dir, argv=[''], folder=None):
             print(i, directory)
 
         print('\nenter number or enter for the newest directory:')
-        selection = raw_input()
+        selection = input()
 
         if selection.isdigit() is True:
             folder = dirs[int(selection)]
@@ -56,7 +56,7 @@ def get_vtk_files(base_dir, argv=[''], folder=None):
         folder = os.path.join(folder, 'vtk_files')
 
     print('enter f to make a figure for final results only or enter to include all timesteps')
-    selection = raw_input()
+    selection = input()
     if 'f' in selection:
         final_figs_only = True
     else:
@@ -93,7 +93,7 @@ def get_vtk_files(base_dir, argv=[''], folder=None):
 
     print('\nenter number of output file to show, two numbers separated by -, ' 
           'a for all files, or r for a random selection of 10 files or enter for the newest file:')
-    selection = raw_input()
+    selection = input()
 
     if selection.isdigit() is True:
         vtk_files = [vtk_files[int(selection)]]
