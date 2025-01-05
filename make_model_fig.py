@@ -55,7 +55,7 @@ def add_subplot_axes(ax, rect, axisbg='w'):
     width *= rect[2]
     height *= rect[3]
 
-    subax = fig.add_axes([x, y, width, height], axisbg=axisbg)
+    subax = fig.add_axes([x, y, width, height])#, axisbg=axisbg)
 
     x_labelsize = subax.get_xticklabels()[0].get_size()
     y_labelsize = subax.get_yticklabels()[0].get_size()
@@ -184,12 +184,12 @@ elif folder is None:
     dirs.sort(key=os.path.getmtime)
     dirs = dirs[::-1]
 
-    print 'grompy-salt output directories from newest to oldest:'
+    print('grompy-salt output directories from newest to oldest:')
     for i, directory in enumerate(dirs):
-        print i, directory
+        print(i, directory)
 
-    print '\nenter number or enter for the newest directory:'
-    selection = raw_input()
+    print('\nenter number or enter for the newest directory:')
+    selection = input()
 
     if selection.isdigit() is True:
         folder = dirs[int(selection)]
@@ -200,8 +200,8 @@ elif folder is None:
 else:
     folder = os.path.join(folder, 'vtk_files')
 
-print 'enter f to make a figure for final results only or enter to include all timesteps'
-selection = raw_input()
+print('enter f to make a figure for final results only or enter to include all timesteps')
+selection = input()
 if 'f' in selection:
     final_figs_only = True
 else:
@@ -232,13 +232,13 @@ vtk_files = vtk_files[::-1]
 vtkf_files = vtkf_files[::-1]
 
 # select file to show:
-print 'grompy-salt output files, from newest to oldest:'
+print('grompy-salt output files, from newest to oldest:')
 for i, vtk_file in enumerate(vtk_files):
-    print i, os.path.split(vtk_file)[-1]
+    print(i, os.path.split(vtk_file)[-1])
 
-print '\nenter number of output file to show, two numbers separated by -, ' \
-      'a for all files, or r for a random selection of 10 files or enter for the newest file:'
-selection = raw_input()
+print('\nenter number of output file to show, two numbers separated by -, ' \
+      'a for all files, or r for a random selection of 10 files or enter for the newest file:')
+selection = input()
 
 if selection.isdigit() is True:
     vtk_files = [vtk_files[int(selection)]]
@@ -265,9 +265,9 @@ elif selection == '':
     vtk_files = [vtk_files[0]]
     vtkf_files = [vtkf_files[0]]
 
-print 'make a figure of solute concentration (enter) only or all parameters (a)'
+print('make a figure of solute concentration (enter) only or all parameters (a)')
 
-if 'a' in raw_input():
+if 'a' in input():
     conc_only = False
 else:
     conc_only = True
@@ -279,12 +279,12 @@ fig_folder = os.path.join(folder_base, 'fig')
 #fig_folder_alt = 'fig'
 path = os.path.normpath(folder_base)
 b = path.split(os.sep)
-fig_folder_alt = os.path.join('fig', b[-1])
+#fig_folder_alt = os.path.join('fig', b[-1])
 
 if os.path.exists(fig_folder) is False:
     os.mkdir(fig_folder)
-if os.path.exists(fig_folder_alt) is False:
-    os.mkdir(fig_folder_alt)
+#if os.path.exists(fig_folder_alt) is False:
+#    os.mkdir(fig_folder_alt)
 
 for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
 
@@ -292,7 +292,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
     #fn = os.path.join(folder, vtk_file)
     fn = vtk_file
 
-    print 'reading vtk file %s' % fn
+    print('reading vtk file %s' % fn)
 
     xy_pts, conn, pt_var_names, pt_var_arrays, cell_var_names, cell_var_arrays = \
         lib.read_vtu_file.read_vtu_file(fn)
@@ -300,7 +300,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
     #fnf = os.path.join(folder, vtkf_file)
     fnf = vtkf_file
 
-    print 'reading vtk file %s' % fnf
+    print('reading vtk file %s' % fnf)
 
     xy_pts_face, conn_face, pt_var_names_face, pt_var_arrays_face, cell_var_names_face, cell_var_arrays_face = \
         lib.read_vtu_file.read_vtu_file(fnf)
@@ -360,15 +360,15 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
 
     if add_colorbar is True:
         rect = [0.75, 0.15, 0.3, 0.03]
-        cax2 = add_subplot_axes(ax, rect, axisbg='w')
+        cax2 = add_subplot_axes(ax, rect)#, axisbg='w')
 
     # create polygons
-    print 'generate polygons for elements'
+    print('generate polygons for elements')
     polys = [xy_pts[conn_i] for conn_i in conn]
-    patches = [matplotlib.patches.Polygon(poly, True)
+    patches = [matplotlib.patches.Polygon(poly)
                for poly in polys]
 
-    print 'generate polygons for face elements'
+    print('generate polygons for face elements')
     polys_face = [xy_pts_face[conn_i] for conn_i in conn_face]
     #patches_face = [matplotlib.patches.Polygon(poly, True)
     #           for poly in polys_face]
@@ -385,7 +385,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
     element_y_face = np.mean(polys_array_face[:, :, 1], axis=1)
 
     # find top bnd fluxes
-    print 'find top bnd fluxes'
+    print('find top bnd fluxes')
     if 'nodal_flux_surface' in pt_var_names:
         f_ind = pt_var_names.index('nodal_flux')
     nfx = pt_var_arrays[f_ind][:, 0]
@@ -418,7 +418,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
     h = pt_var_arrays[pt_var_names.index('h')]
     h_top = h[bnd_ind][x_order]
 
-    print 'rotate flux'
+    print('rotate flux')
     nodal_flux_rotated = \
         get_normal_flux_to_bnd(nodal_flux_top_sorted,
                                top_xy_sorted)
@@ -433,11 +433,11 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
     nfx *= year
     nfy *= year
 
-    print 'creating figs'
+    print('creating figs')
 
     show_watertable = False
     if show_watertable is True:
-        print 'calculating watertable position'
+        print('calculating watertable position')
 
         p_ind = pt_var_names.index('pressure')
         pressure_array = pt_var_arrays[p_ind]
@@ -455,7 +455,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
         xgf, ygf = xg.flatten(), yg.flatten()
 
         # interpolate u to grid
-        print 'interpolating pressure to regular grid'
+        print('interpolating pressure to regular grid')
         pressure_array_regular = scipy.interpolate.griddata(xy_pts_corr,
                                                             pressure_array,
                                                             np.vstack((xgf, ygf)).T,
@@ -466,7 +466,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
         ny, nx = xg.shape
 
         # find P=0 for each x
-        print 'finding point where P=0 for each column:'
+        print('finding point where P=0 for each column:')
         watertable_elevation = np.zeros(nx)
         watertable_x = xi.copy()
         for ix in range(nx):
@@ -502,7 +502,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
                                                 pt_var_names_plot,
                                                 pt_var_arrays_plot):
 
-        print pt_var_name
+        print(pt_var_name)
 
         for vdim in range(len(pt_var_array.shape)):
             if len(pt_var_array.shape) > 1:
@@ -564,7 +564,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
                 va = (qx ** 2 + qy ** 2) ** 0.5
                 scale = np.abs(va).max() * 10.0
 
-                print 'converting flux to regular grid'
+                print('converting flux to regular grid')
                 xg, yg, qxg, qyg = convert_to_grid(element_x, element_y,
                                                    qx * year,
                                                    qy * year, dx=dx, dy=dy)
@@ -629,7 +629,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
 
                 # TODO show seepage bnd:
                 if debug is True:
-                    print 'showing loc of seepage bnd'
+                    print('showing loc of seepage bnd')
                     ind = pt_var_names.index('active_seepage_bnd')
                     ind2 = pt_var_arrays[ind] > 0
                     xys = xy_pts[ind2]
@@ -680,7 +680,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
                                    color='gray', lw=1.5)
 
                 if debug is True:
-                    print 'hydraulic head at top nodes: ', h_top
+                    print('hydraulic head at top nodes: ', h_top)
                 # add vertical line at coastline
                 ax.axvline(x=0, color='black', lw=0.5, zorder=0)
 
@@ -700,11 +700,11 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
 
 
             fn_out = os.path.join(fig_folder, fig_fn)
-            fn_out_alt = os.path.join(fig_folder_alt, fig_fn)
-            print 'saving ', fn_out
+            #fn_out_alt = os.path.join(fig_folder_alt, fig_fn)
+            print('saving ', fn_out)
             fig.savefig(fn_out, dpi=dpi)
-            print 'saving ', fn_out_alt
-            fig.savefig(fn_out_alt, dpi=dpi)
+            #print('saving ', fn_out_alt)
+            #fig.savefig(fn_out_alt, dpi=dpi)
 
 pl.clf()
-print 'done'
+print('done')
