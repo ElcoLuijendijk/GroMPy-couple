@@ -482,7 +482,12 @@ def main():
 
             print('numbering new model runs starting at %i' % firstrun)
 
-    if ModelOptions.model_scenario_list is not 'file':
+    if ModelOptions.run_multiple_scenarios == False:
+        scenario_parameter_combinations = []
+        scenario_param_names = ["base"]
+        model_scenario_names = ["base"]
+        
+    elif ModelOptions.model_scenario_list is not 'file':
 
         # get names of scenario parameters
         # import model parameter ranges
