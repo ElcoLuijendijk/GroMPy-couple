@@ -292,8 +292,11 @@ def set_boundary_conditions(mesh, surface, sea_surface, z_surface, Parameters):
             specified_concentration_bnd = \
                 es.whereNegative(xy[0]) * sea_surface + es.whereNonNegative(xy[0]) * surface
         else:
-            specified_concentration_bnd = es.whereNegative(xy[0]) * surface
-
+            #specified_concentration_bnd = es.whereNegative(xy[0]) * surface
+            specified_concentration_bnd = es.whereNegative(Parameters.specified_concentration_xmin - xy[0]) * \
+                es.wherePositive(Parameters.specified_concentration_xmax - xy[0]) * \
+                es.wherePositive(surface)
+            
         specified_concentration = (es.whereNegative(xy[0]) * Parameters.seawater_concentration
                                    + es.whereNonNegative(xy[0]) * Parameters.freshwater_concentration)
 
