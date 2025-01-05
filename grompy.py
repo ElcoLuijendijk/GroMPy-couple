@@ -110,9 +110,9 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     for a in attribute_dict:
         if a[0] in df.columns:
             if type(a[1]) is list:
-                df.ix[run, a[0]] = str(a[1])
+                df.loc[run, a[0]] = str(a[1])
             else:
-                df.ix[run, a[0]] = a[1]
+                df.loc[run, a[0]] = a[1]
 
     #
     start_time = datetime.datetime.now()
@@ -122,8 +122,8 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     start_time_str = '%i:%i:%i' % (start_time.hour,
                                    start_time.minute,
                                    start_time.second)
-    df.ix[run, 'start_date'] = start_date_str
-    df.ix[run, 'start_time'] = start_time_str
+    df.loc[run, 'start_date'] = start_date_str
+    df.loc[run, 'start_time'] = start_time_str
 
     # run a single model scenario
     model_results = grompy_salt_lib.run_model_scenario(
@@ -137,7 +137,7 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
 
     end_time = datetime.datetime.now()
     runtime = end_time - start_time
-    df.ix[run, 'computing_runtime_sec'] = runtime.total_seconds()
+    df.loc[run, 'computing_runtime_sec'] = runtime.total_seconds()
 
     print('processing model results')
     # get model results
@@ -223,44 +223,44 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
         df['model_scenario_id'] = ''
 
     # store model results in dataframe
-    df.ix[run, 'model_scenario_id'] = run_id
+    df.loc[run, 'model_scenario_id'] = run_id
     if model_scenario_name is not None:
-        df.ix[run, 'model_scenario_name'] = model_scenario_name
-    df.ix[run, 'P_min'] = es.inf(P)
-    df.ix[run, 'P_max'] = es.sup(P)
-    df.ix[run, 'C_min'] = es.inf(Conc)
-    df.ix[run, 'C_max'] = es.sup(Conc)
-    df.ix[run, 'h_min'] = es.inf(h)
-    df.ix[run, 'h_max'] = es.sup(h)
-    df.ix[run, 'vx_min'] = es.inf(flux[0])
-    df.ix[run, 'vx_max'] = es.sup(flux[0])
-    df.ix[run, 'vy_min'] = es.inf(flux[1])
-    df.ix[run, 'vy_max'] = es.sup(flux[1])
-    df.ix[run, 'max_pressure_change'] = es.Lsup(Pdiff)
-    df.ix[run, 'max_concentration_change'] = es.Lsup(Cdiff)
-    df.ix[run, 'runtime'] = runtime
-    df.ix[run, 'nsteps'] = nsteps
-    df.ix[run, 'dt_final'] = dt
-    df.ix[run, 'total_flux_over_surface'] = total_flux_over_surface_norm[1]
-    df.ix[run, 'total_rch_flux'] = total_rch_flux[1]
-    df.ix[run, 'total_seepage_flux'] = total_seepage_flux[1]
-    df.ix[run, 'total_land_flux_in'] = total_land_flux_in[1]
-    df.ix[run, 'total_land_flux_out'] = total_land_flux_out[1]
-    df.ix[run, 'total_submarine_flux'] = total_submarine_flux[1]
-    df.ix[run, 'total_submarine_flux_in'] = total_submarine_flux_in[1]
-    df.ix[run, 'total_submarine_flux_out'] = total_submarine_flux_out[1]
-    df.ix[run, 'ext_inflow_land'] = ext_inflow_land[1]
-    df.ix[run, 'ext_outflow_land'] = ext_outflow_land[1]
-    df.ix[run, 'ext_inflow_sea'] = ext_inflow_sea[1]
-    df.ix[run, 'ext_outflow_sea'] = ext_outflow_sea[1]
-    df.ix[run, 'ext_outflow_land_exc_threshold'] = ext_outflow_land_threshold[1]
-    df.ix[run, 'ext_outflow_sea_exc_threshold'] = ext_outflow_sea_threshold[1]
-    df.ix[run, 'min_land_flux'] = min_land_flux
-    df.ix[run, 'max_land_flux'] = max_land_flux
-    df.ix[run, 'min_seepage_flux'] = min_seepage_flux
-    df.ix[run, 'max_seepage_flux'] = max_seepage_flux
-    df.ix[run, 'min_submarine_flux'] = min_submarine_flux
-    df.ix[run, 'max_submarine_flux'] = max_submarine_flux
+        df.loc[run, 'model_scenario_name'] = model_scenario_name
+    df.loc[run, 'P_min'] = es.inf(P)
+    df.loc[run, 'P_max'] = es.sup(P)
+    df.loc[run, 'C_min'] = es.inf(Conc)
+    df.loc[run, 'C_max'] = es.sup(Conc)
+    df.loc[run, 'h_min'] = es.inf(h)
+    df.loc[run, 'h_max'] = es.sup(h)
+    df.loc[run, 'vx_min'] = es.inf(flux[0])
+    df.loc[run, 'vx_max'] = es.sup(flux[0])
+    df.loc[run, 'vy_min'] = es.inf(flux[1])
+    df.loc[run, 'vy_max'] = es.sup(flux[1])
+    df.loc[run, 'max_pressure_change'] = es.Lsup(Pdiff)
+    df.loc[run, 'max_concentration_change'] = es.Lsup(Cdiff)
+    df.loc[run, 'runtime'] = runtime
+    df.loc[run, 'nsteps'] = nsteps
+    df.loc[run, 'dt_final'] = dt
+    df.loc[run, 'total_flux_over_surface'] = total_flux_over_surface_norm[1]
+    df.loc[run, 'total_rch_flux'] = total_rch_flux[1]
+    df.loc[run, 'total_seepage_flux'] = total_seepage_flux[1]
+    df.loc[run, 'total_land_flux_in'] = total_land_flux_in[1]
+    df.loc[run, 'total_land_flux_out'] = total_land_flux_out[1]
+    df.loc[run, 'total_submarine_flux'] = total_submarine_flux[1]
+    df.loc[run, 'total_submarine_flux_in'] = total_submarine_flux_in[1]
+    df.loc[run, 'total_submarine_flux_out'] = total_submarine_flux_out[1]
+    df.loc[run, 'ext_inflow_land'] = ext_inflow_land[1]
+    df.loc[run, 'ext_outflow_land'] = ext_outflow_land[1]
+    df.loc[run, 'ext_inflow_sea'] = ext_inflow_sea[1]
+    df.loc[run, 'ext_outflow_sea'] = ext_outflow_sea[1]
+    df.loc[run, 'ext_outflow_land_exc_threshold'] = ext_outflow_land_threshold[1]
+    df.loc[run, 'ext_outflow_sea_exc_threshold'] = ext_outflow_sea_threshold[1]
+    df.loc[run, 'min_land_flux'] = min_land_flux
+    df.loc[run, 'max_land_flux'] = max_land_flux
+    df.loc[run, 'min_seepage_flux'] = min_seepage_flux
+    df.loc[run, 'max_seepage_flux'] = max_seepage_flux
+    df.loc[run, 'min_submarine_flux'] = min_submarine_flux
+    df.loc[run, 'max_submarine_flux'] = max_submarine_flux
 
     # save model output to vtk file
     if ModelOptions.save_vtk_files is True:
@@ -305,7 +305,7 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
                            submarine_flux_in=submarine_flux_in,
                            submarine_flux_out=submarine_flux_out)
 
-        df.ix[run, 'vtk_filename'] = fn_VTK
+        df.loc[run, 'vtk_filename'] = fn_VTK
 
     if ModelOptions.save_variables_to_csv is True:
 
@@ -486,7 +486,7 @@ def main():
         scenario_parameter_combinations = []
         scenario_param_names = ["base"]
         model_scenario_names = ["base"]
-        
+
     elif ModelOptions.model_scenario_list is not 'file':
 
         # get names of scenario parameters
@@ -535,7 +535,7 @@ def main():
 
         scenario_parameter_combinations = []
         for i in scen_df.index:
-            scenario_parameter_combinations.append(list(scen_df.ix[i])[1:])
+            scenario_parameter_combinations.append(list(scen_df.loc[i])[1:])
 
     # read default model parameter file
     Parameters = ModelParameters()
