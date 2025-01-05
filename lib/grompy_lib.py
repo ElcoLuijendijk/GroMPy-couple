@@ -210,7 +210,180 @@ def get_boundary_flux_simple(flux, bnd):
     return flux_xy, flux_normal
 
 
-def set_boundary_conditions(mesh, surface, sea_surface, z_surface, Parameters):
+def set_boundary_conditions(mesh, surface,  z_surface, Parameters):
+
+    """
+    Set boundary conditions.
+    
+    Parameters
+    ----------
+    mesh :
+        escript mesh
+    rho_f_0 : float
+        fluid density at solute concentration = 0
+    
+    gamma : float
+        coefficient of density increase
+    g : float
+        gravitational constant
+    initial_condition_parameters : list
+    
+    Returns
+    -------
+    specified_pressure : escript variable
+        specified pressure
+    specified_pressure_bnd : escript variable
+        location of specified pressure boundary
+        (1=spec pressure, 0 is no spec pressure)
+    specified_concentration : escript variable
+        specified concentration 
+    specified_concentration_bnd : escript variable
+        lcoation of specified concentration boundary
+    rch_bnd_loc : escript variable
+        location of recharge boundary
+    drain_bnd_loc : escript variable
+        location of drain boundary
+        
+    """
+
+    xy = mesh.getX()
+
+    #rho_f_salt = Parameters.seawater_concentration * Parameters.gamma + \
+    #    Parameters.rho_f_0
+    #rho_f_salt = gwflow_lib.calculate_fluid_density(
+    #    Parameters.seawater_concentration,
+    #    Parameters.gamma,
+    #    Parameters.rho_f_0)
+    #rho_f_fresh = Parameters.freshwater_concentration * Parameters.gamma +
+    # Parameters.rho_f_0
+
+    # drain bnd location
+    drain_bnd_loc = es.whereNegative(Parameters.drain_bnd_xmin - xy[0]) * \
+        es.wherePositive(Parameters.drain_bnd_xmax - xy[0]) * \
+        es.wherePositive(surface)
+
+    # recharge bnd location
+    try:
+        # use tags to set bnd
+        rch_bnd_loc = es.Scalar(0, es.FunctionOnBoundary(mesh))
+        rch_bnd_loc.setTaggedValue("land_surface1", 1)
+        rch_bnd_loc.setTaggedValue("land_surface2", 1)
+
+        xy_rch = rch_bnd_loc.getFunctionSpace().getX()
+
+        # make sure no recharge at sea or coastal node:
+        rch_bnd_loc = rch_bnd_loc * es.wherePositive(xy_rch[0])
+
+    except RuntimeError:
+        print('could not set recharge bnd using tags, using location instead')
+        rch_bnd_loc = (es.whereNegative(Parameters.recharge_mass_flux_xmin -
+                                        xy[0])
+                       * es.wherePositive(Parameters.recharge_mass_flux_xmax -
+                                          xy[0])
+                       * es.wherePositive(surface))
+
+    rch_xy, rch_array = convert_to_array(rch_bnd_loc)
+    print('number of active recharge nodes = %i' % rch_array.sum())
+
+    #
+    if Parameters.specified_concentration_surface is True:
+        print('assigning specified concentration only to the surface up to x=0:')
+        #specified_concentration_bnd = es.whereNegative(xy[0]) * surface
+        specified_concentration_bnd = es.whereNegative(Parameters.specified_concentration_xmin - xy[0]) * \
+            es.wherePositive(Parameters.specified_concentration_xmax - xy[0]) * \
+            es.wherePositive(surface)
+        
+        specified_concentration = (es.whereNegative(xy[0]) * Parameters.specified_concentration
+                                   + es.whereNonNegative(xy[0]) * Parameters.specified_concentration)
+
+    else:
+
+        specified_concentration_bnd = surface * 0
+        specified_concentration = surface * 0
+        for xmin, xmax, ymin, ymax, spec_conc_segment in zip(Parameters.specified_concentration_xmin,
+                                                             Parameters.specified_concentration_xmax,
+                                                             Parameters.specified_concentration_ymin,
+                                                             Parameters.specified_concentration_ymax,
+                                                             Parameters.specified_concentration):
+
+            print('assigning specified concentration of %0.4f at surface from x=%0.2f to %0.2f, y=%0.2f to %0.2f' %
+                  (spec_conc_segment, xmin, xmax, ymin, ymax))
+
+            specified_concentration_bnd_segment = (es.whereNonPositive(xmin - xy[0]) *
+                                                   es.whereNonNegative(xmax - xy[0]) *
+                                                   es.whereNonPositive(ymin - xy[1]) *
+                                                   es.whereNonNegative(ymax - xy[1]))
+            specified_concentration_bnd += specified_concentration_bnd_segment
+            specified_concentration += (specified_concentration_bnd_segment * spec_conc_segment)
+
+    # calculate product of concentration and density for bnd nodes
+    specified_concentration_rho = \
+        gwflow_lib.calculate_fluid_density(specified_concentration,
+                                           Parameters.gamma,
+                                           Parameters.rho_f_0)
+    specified_concentration_rho_f = (specified_concentration *
+                                     specified_concentration_rho)
+    # set specified pressure boundary:
+    print('setting specified pressure nodes at surface')
+    if Parameters.specified_pressure_surface is True:
+    
+        specified_pressure_bnd = \
+            es.whereNegative(Parameters.specified_pressure_xmin - xy[0]) * es.wherePositive(Parameters.specified_pressure_xmax - xy[0]) * es.wherePositive(surface)
+
+        specified_pressure = (specified_pressure_bnd * Parameters.specified_pressure)
+    else:
+        # create scalars with value zero:
+        specified_pressure_bnd = es.wherePositive(surface) * 0
+        specified_pressure = es.wherePositive(surface) * 0
+
+        for xmin, xmax, ymin, ymax, spec_pressure_segment in zip(Parameters.specified_pressure_xmin,
+                                                                 Parameters.specified_pressure_xmax,
+                                                                 Parameters.specified_pressure_ymin,
+                                                                 Parameters.specified_pressure_ymax,
+                                                                 Parameters.specified_pressure):
+
+            print('assigning spec. pressure %0.3f to segment x=%0.3f-%0.3f, y=%0.3f-%0.3f'
+                  % (spec_pressure_segment, xmin, xmax, ymin, ymax))
+
+            spec_pressure_bound_segment = es.whereNonPositive(xmin - xy[0]) * es.whereNonNegative(xmax - xy[0]) * \
+                                          es.whereNonPositive(ymin - xy[1]) * es.whereNonNegative(ymax - xy[1])
+
+            specified_pressure_bnd += spec_pressure_bound_segment
+            specified_pressure += spec_pressure_bound_segment * spec_pressure_segment
+
+            # calculate hydrostatic pressure and add to pressure bnd:
+            d = (ymax - xy[1])
+            density_segment = es.sup(spec_pressure_bound_segment * specified_concentration_rho)
+            dPh = spec_pressure_bound_segment * es.wherePositive(d) * d * density_segment * Parameters.g
+            specified_pressure += spec_pressure_bound_segment * dPh
+
+            print('added hydrostatic pressure to this segment: ', dPh)
+            print('using density ', density_segment)
+            print('warning: this assumes constant density in the fluid column at this location')
+            print('hydrostatic pressure bnd condition with varying concentration/density is not implemented yet')
+
+    #
+    sp_xy, spec_pressure_array = convert_to_array(specified_pressure_bnd)
+    print('number of specified pressure bnd nodes: %i' % spec_pressure_array.sum())
+
+    su_xy, su_array = convert_to_array(surface)
+    spc_xy, spec_c_array = convert_to_array(specified_concentration_bnd)
+    print('number of surface nodes = %i' % su_array.sum())
+    print('number of specified concentration bnd nodes: %i' % \
+          spec_c_array.sum())
+    print('specified concentration ', specified_concentration)
+    ind = spec_c_array == 1
+    max_x_sc = np.max(spc_xy[:, 0][ind])
+    min_x_sc = np.min(spc_xy[:, 0][ind])
+    print('active from x = %0.1f to %0.1f ' % (min_x_sc, max_x_sc))
+
+    return (specified_pressure, specified_pressure_bnd,
+            specified_concentration,
+            specified_concentration_rho_f, specified_concentration_bnd,
+            rch_bnd_loc, drain_bnd_loc)
+
+
+def set_boundary_conditions_coastal_models(mesh, surface, sea_surface, z_surface, Parameters):
 
     """
     Set boundary conditions for coastal aquifer model.
@@ -484,7 +657,72 @@ def depth_sw_interface_Glover1959(x, k, viscosity, hydr_gradient, thickness, rho
     return y, intersect_top, intersect_bottom
 
 
-def set_initial_conditions(mesh, z_surface, seawater, Parameters):
+def set_initial_conditions(mesh, z_surface, Parameters):
+    """
+    Set initial conditions, default model setup
+    
+    Parameters
+    ----------
+    mesh :
+        escript mesh
+    Parameters : class
+        class containing all model parameters
+        
+    Returns
+    -------
+    P0 : escript variable
+        initial pressure (Pa)
+    conc0 : escript variable
+        initial solute concentration (kg/kg)
+    rho_f_init : escript variable
+        initial fluid density (kg/m^3)
+    
+    """
+
+    # find top node
+    xy = mesh.getX()
+
+    if Parameters.analytical_solution_initial_h is True:
+        print('calculating initial hydraulic head using analytical solution')
+        # calculate initial hydraulic head using analytical solution
+        R = Parameters.recharge_flux
+        B = Parameters.thickness
+        K = Parameters.k * Parameters.rho_f_0 * 9.81 / Parameters.viscosity
+        L = Parameters.L
+
+        # calculate hydraulic head using analytical solution for confined aq
+        # with uniform recharge + Dupuit assumptions
+        h = R / (K * B) * (L * xy[0] - 0.5 * xy[0]**2)
+
+        h_adj = (es.wherePositive(xy[0]) * h
+                 + es.wherePositive(-xy[0]) * z_surface)
+
+        h_adj2 = (es.wherePositive(h_adj - z_surface) * z_surface +
+                  es.whereNonPositive(h_adj - z_surface) * h_adj)
+
+        z_surface = h_adj2
+
+        print('analytical solution for initial h: ', h_adj)
+
+    depth = z_surface - xy[1]
+    
+    # TODO: make this a bit less ugly:
+    conc0 = es.wherePositive(xy[0]) * Parameters.initial_concentration
+    conc0 += es.whereNonPositive(xy[0]) * Parameters.initial_concentration
+    #conc0 = es.Scalar(0, es.Function(mesh))
+    
+    # initial fluid density
+    rho_f_init = gwflow_lib.calculate_fluid_density(conc0,
+                                                    Parameters.gamma,
+                                                    Parameters.rho_f_0)
+
+    # set initial hydrostatic pressure
+    pressure0 = rho_f_init * Parameters.g * depth
+
+    return pressure0, conc0, rho_f_init
+
+
+def set_initial_conditions_coastal_models(mesh, z_surface, seawater, Parameters):
     """
     Set initial conditions for coastal aquifer models.
     
@@ -536,8 +774,10 @@ def set_initial_conditions(mesh, z_surface, seawater, Parameters):
     depth_under_sea = Parameters.sea_water_level - z_surface
 
     # initial salinity and fluid density
+
     # assume Ghyben-Herzberg initial conditions with P=0 at surface elevation
     if Parameters.ghyben_herzberg is True:
+
         #print 'initial concentration follow Ghyben-Herzberg relation'
         print('new initial cond: fresh-salt water interface now calculated using analytical solution Glover (1959) JGR')
         print('still called Ghyben-Herzberg in input file though....')
@@ -573,7 +813,8 @@ def set_initial_conditions(mesh, z_surface, seawater, Parameters):
         # TODO: make this a bit less ugly:
         conc0 = es.wherePositive(xy[0]) * Parameters.freshwater_concentration
         conc0 += es.whereNonPositive(xy[0]) * Parameters.seawater_concentration
-
+        #conc0 = es.Scalar(0, es.Function(mesh))
+        
     # make sure seawater salinity at sea:
     if seawater is not None:
         conc0 = es.wherePositive(seawater) * Parameters.seawater_concentration + es.whereZero(seawater) * conc0
@@ -684,21 +925,28 @@ def run_model_scenario(scenario_name,
     # specified_concentration, specified_concentration_rho_f,
     # specified_concentration_bnd, rch_bnd_loc, drain_bnd_loc) = \
     #    set_boundary_conditions(mesh, surface, z_surface, Parameters)
-    (specified_pressure, specified_pressure_bnd,
-     specified_concentration, specified_concentration_rho_f,
-     specified_concentration_bnd, rch_bnd_loc, drain_bnd_loc) = \
-        set_boundary_conditions(mesh, surface, sea_surface, z_surface,
-                                Parameters)
+    if Parameters.mesh_type is 'coastal':
+        (specified_pressure, specified_pressure_bnd,
+        specified_concentration, specified_concentration_rho_f,
+        specified_concentration_bnd, rch_bnd_loc, drain_bnd_loc) = \
+            set_boundary_conditions_coastal_models(mesh, surface, sea_surface, z_surface,
+                                    Parameters)
+    else:
+        (specified_pressure, specified_pressure_bnd,
+        specified_concentration, specified_concentration_rho_f,
+        specified_concentration_bnd, rch_bnd_loc, drain_bnd_loc) = \
+            set_boundary_conditions(mesh, surface, z_surface, Parameters)
 
     print('set up initial conditions')
     if Parameters.mesh_type is 'coastal':
-        pressure0, conc0, rho_f_init = set_initial_conditions(mesh,
+        pressure0, conc0, rho_f_init = set_initial_conditions_coastal_models(mesh,
                                                               z_surface,
                                                               seawater,
                                                               Parameters)
     else:
-        pressure0 = specified_pressure
-        conc0 = specified_concentration
+        pressure0, conc0, rho_f_init = set_initial_conditions(mesh,
+                                                        z_surface,
+                                                        Parameters)
 
     rho_f_init = gwflow_lib.calculate_fluid_density(conc0, Parameters.gamma,
                                                     Parameters.rho_f_0)
