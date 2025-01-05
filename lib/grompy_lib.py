@@ -289,13 +289,23 @@ def set_boundary_conditions(mesh, surface,  z_surface, Parameters):
     if Parameters.specified_concentration_surface is True:
         print('assigning specified concentration only to the surface up to x=0:')
         #specified_concentration_bnd = es.whereNegative(xy[0]) * surface
-        specified_concentration_bnd = es.whereNegative(Parameters.specified_concentration_xmin - xy[0]) * \
-            es.wherePositive(Parameters.specified_concentration_xmax - xy[0]) * \
-            es.wherePositive(surface)
+        #specified_concentration_bnd = es.whereNegative(Parameters.specified_concentration_xmin - xy[0]) * \
+        #    es.wherePositive(Parameters.specified_concentration_xmax - xy[0]) * \
+        #    es.wherePositive(surface)
+        
+        #xy_spec_conc = specified_concentration_bnd.getFunctionSpace().getX()
+
+        # assign to user specified section:
+        specified_concentration_bnd = surface * es.whereNegative(Parameters.specified_concentration_xmin - xy[0]) * \
+            es.wherePositive(Parameters.specified_concentration_xmax - xy[0])
+
         
         specified_concentration = (es.whereNegative(xy[0]) * Parameters.specified_concentration
                                    + es.whereNonNegative(xy[0]) * Parameters.specified_concentration)
-
+        
+        spec_conc_xy, spec_conc_array = convert_to_array(specified_concentration_bnd)
+        print(f"number of active specified concentration nodes = {spec_conc_array.sum()}")
+        
     else:
 
         specified_concentration_bnd = surface * 0
@@ -1467,6 +1477,11 @@ def run_model_scenario(scenario_name,
             print('max seepage bnd flux          ', max_seepage_flux)
             print('min submarine bnd flux        ', min_submarine_flux)
             print('max submarine bnd flux        ', max_submarine_flux)
+
+            spc_xy, spec_c_array = convert_to_array(specified_concentration_bnd)
+            print('number of specified concentration bnd nodes: %i' % \
+                spec_c_array.sum())
+            print('specified concentration ', specified_concentration)
 
             #####################
             # boundary conditions
