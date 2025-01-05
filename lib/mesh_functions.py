@@ -382,3 +382,72 @@ def setup_rectangular_mesh(Parameters,
     seawater = None
 
     return mesh, surface, sea_surface, seawater, z_surface
+
+
+def setup_standard_mesh(Parameters, mesh_filename):
+    """
+    Create a mesh with bi-linear surface topography
+
+    """
+
+    # if Parameters.topo_gradient == 0:
+    #    extent_salt_water = 0
+    # else:
+    #    extent_salt_water = (Parameters.thickness /
+    #                         (41.0 * Parameters.topo_gradient))
+
+
+
+    ###############################
+    # use gmsh to construct domain
+    ##############################
+    xs = np.array([0, Parameters.x_topo_break, Parameters.L, Parameters.L, Parameters.x_topo_break, 0])
+
+    z1 = Parameters.x_topo_break * Parameters.topo_gradient
+    z2 = z1 + (Parameters.L - Parameters.x_topo_break) * Parameters.topo_gradient_hinterland
+    zs = np.array([0, z1, z2, z2 - Parameters.thickness, z1 - Parameters.thickness, -Parameters.thickness ])
+
+    # points = create_points(xs,zs)
+    points = [pc.Point(x, z) for x, z in zip(xs, zs)]
+
+    line1 = pc.Line(points[0], points[1])
+    line2 = pc.Line(points[1], points[2])
+    line3 = pc.Line(points[2], points[3])
+    line4 = pc.Line(points[3], points[4])
+    line5 = pc.Line(points[4], points[5])
+    line6 = pc.Line(points[5], points[0])
+    
+    # finer grid cell size around fresh-salt water interface
+    curve = pc.CurveLoop(line1, line2, line3, line4, line5, line6)
+    
+    surface = pc.PlaneSurface(curve)
+    
+    d = gmsh.Design(dim=2, element_size=Parameters.cellsize)
+
+    ps1 = pc.PropertySet("land_surface1", line1)
+    ps2 = pc.PropertySet("land_surface2", line2)
+
+    d.addItems(pc.PropertySet('land', surface),
+               ps1, ps2)
+
+    d.setMeshFileName(mesh_filename)
+
+    print('=' * 30)
+
+    mesh = fl.MakeDomain(d, optimizeLabeling=True)
+
+    # calculate surface
+    xy = mesh.getX()
+    after_break = es.wherePositive(xy[0] - Parameters.x_topo_break)
+    z_surface = xy[0] * Parameters.topo_gradient + after_break * (z1 + (xy[0] - Parameters.x_topo_break) * Parameters.topo_gradient_hinterland
+    )
+    #z_surface[after_break] = z1 + (xy[0][after_break] - Parameters.x_topo_break) * Parameters.topo_gradient[1]
+    
+    surface = es.whereZero(xy[1] - z_surface)
+
+    # sea surface
+    # sea_surface = surface * es.whereNegative(xy[0])
+    sea_surface = None
+    seawater = None
+
+    return mesh, surface, sea_surface, seawater, z_surface
