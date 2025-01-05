@@ -439,10 +439,14 @@ def setup_standard_mesh(Parameters, mesh_filename):
     # calculate surface
     xy = mesh.getX()
     after_break = es.wherePositive(xy[0] - Parameters.x_topo_break)
-    z_surface = xy[0] * Parameters.topo_gradient + after_break * (z1 + (xy[0] - Parameters.x_topo_break) * Parameters.topo_gradient_hinterland
-    )
+    x_after_break = xy[0] - Parameters.x_topo_break
+    #z_extra_after_break = 
+    z_surface1 = xy[0] * Parameters.topo_gradient
+    z_surface2 = after_break * x_after_break * (Parameters.topo_gradient_hinterland - Parameters.topo_gradient)
+
     #z_surface[after_break] = z1 + (xy[0][after_break] - Parameters.x_topo_break) * Parameters.topo_gradient[1]
-    
+    z_surface = z_surface1 + z_surface2
+
     surface = es.whereZero(xy[1] - z_surface)
 
     # sea surface
