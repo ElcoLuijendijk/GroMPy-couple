@@ -2,9 +2,9 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.2616534.svg)](https://doi.org/10.5281/zenodo.2616534)
 
-GroMPy-couple is a 2D cross-sectional model of coupled density-driven groundwater flow and solute transport. The groundwater flow and solute transport euqations are solved by an external finite element model code [esys-escript](https://github.com/LutzGross/esys-escript.github.io). The exchange between groundwater and baseflow/evapotranspiration simulated using a seepage algorithm. GroMPy-couple includes support for automated runs of series of model experiments using parallel computing.
+GroMPy-couple is a 2D cross-sectional model of coupled density-driven groundwater flow and solute transport. The groundwater flow and solute transport equations are solved by an external finite element model code [esys-escript](https://github.com/LutzGross/esys-escript.github.io). The discharge of groundwater to river baseflow, surface runoff or evapotranspiration is simulated using the seepage algorithm (following [Batelaan & De Smedt, 2005](https://doi.org/10.1111/j.1745-6584.2004.tb02626.x)). GroMPy-couple includes support for automated runs of series of model experiments using parallel computing.
 
-This code was used to run a large set of model experiments that simulate coastal groundwater discharge, as documented in this paper: Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nat Commun 11, 1260 (2020). [https://doi.org/10.1038/s41467-020-15064-8](https://doi.org/10.1038/s41467-020-15064-8)
+This code was used to run a large set of model experiments that simulate coastal groundwater discharge, as documented in this paper: Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nature Communications 11, 1260 (2020). [https://doi.org/10.1038/s41467-020-15064-8](https://doi.org/10.1038/s41467-020-15064-8)
 
 ![](fig/model_example_fig_small.png)
 
@@ -29,7 +29,7 @@ GroMPy-couple requires the following Python modules:
     * an installation guide can be found here: https://github.com/LutzGross/esys-escript.github.io/blob/master/install.pdf 
 * Unzip the GroMPy-couple source code
 
-The latest succefull installs of GroMPy-couple were on Ubuntu linux version 20.04 and esys-escript version 5.10, using the installation / building from source instructions in the manual.
+The latest successful installs of GroMPy-couple were on Ubuntu linux version 20.04 and esys-escript version 5.10, using the installation / building from source instructions in the manual.
 
 ### Running an example dataset
 * Navigate to the directory where you have installed escript and navigate to the `src/bin` directory 
@@ -60,13 +60,13 @@ $ python grompy_parallel.py model_parameters_sensitivity.py
 
 This will automatically run all model experiments specified in the model_parameters_sensitivity.py file.
 
-The number of simultaneous model runs is controlled by the parameter `max_proc` in the model parameters file. Note that each single model run will still use the number of cores specified by run-escript (using the -t argument, see the escript documentation), or the OMP_NUM_THREADS setting in your .bashrc or profile file. For example add the following line to your bashrc file if you want GroMPy-couple to use 10 threads for each model run add export OMP_NUM_THREADS=10. If you then set `max_proc = 4` and run grompy_parallel.py, 4 model runs will be executed simultaneously that each use 10 cores. grompy_parallel will start a new run once a run has finished until the entire set of model sensitivity or model parameter combination runs are done.
+The number of simultaneous model runs is controlled by the parameter `max_proc` in the model parameters file. Note that each single model run will still use the number of cores specified by run-escript (using the -t argument, see the escript documentation), or the OMP_NUM_THREADS setting in your bashrc or profile file. For example add the following line to your bashrc file if you want GroMPy-couple to use 10 threads for each model run add export OMP_NUM_THREADS=10. If you then set `max_proc = 4` and run grompy_parallel.py, 4 model runs will be executed simultaneously that each use 10 cores. grompy_parallel will start a new run once a run has finished until the entire set of model sensitivity or model parameter combination runs are done.
 
 
 ## Model output
 
 ### VTK files
-The mesh and variables are saved as VTK files. The VTK files are saved at a location that you can specify by setting the parameter `model_output_dir` in the model parameter file. VTK files can be used by applications such as [Paraview](https://www.paraview.org) or [Mayavi](http://docs.enthought.com/mayavi/mayavi/) to visualize model results.
+The mesh and variables are saved as VTK files. The VTK files are saved at a location that you can specify by setting the parameter `model_output_dir` in the model parameter file. VTK files can be used by applications such as [Paraview](https://www.paraview.org) or [Mayavi](http://docs.enthought.com/mayavi/mayavi/) to visualise model results.
 
 ### Figures
 In addition, GroMPy-couple contains a separate python script, ``make_model_fig.py``, to make figures of the model output. To run this file, open a terminal, navigate to the GroMPy-couple directory and run the command `python make_model_fig.py vtk_file`, where `vtk_file` is the path to the VTK file that you would like to make a figure of. If you do not provide a VTK filename and simply run `python make_2d_model_fig.py` the script will look for VTK files in the directory `model_output` and will ask you which subdirectory and which vtk files you want select. Any figures created by this script are saved to new subdirectory `fig` that is placed in the directory that contains the VTK file. The file `model_input/figure_options.py` contains several parameters that control how the figures look,
@@ -89,7 +89,7 @@ The results of the salt-wedge model runs can be compared to experimental results
 ![](benchmark_data/model_vs_experimental_salt_wedge_small.png)
 
 ### Coastal groundwater discharge
-Three example files for modeling a coastal groundwater system can be found in the `model_input` directory:
+Three example files for modelling a coastal groundwater system can be found in the `model_input` directory:
 
 * `model_parameters.py`: This file contains parameters for a single model run of the global median coastal watershed, i.e.: a coastal aquifer with median values for permeability, topographic gradient, length and groundwater recharge following the results of a global geospatial analysis.
 * `model_parameters_sensitivity.py`: This file contains parameters for a series of model runs to quantify the sensitivity of coastal (submarine and terrestrial) groundwater discharge to controlling parameters such as permeability, recharge, topographic gradient, watershed length and dispersivity. The values of the parameters that will be tested are located in the class `ParameterRanges`, whereas the default parameters are located in the class `ModelParameters`.
@@ -99,7 +99,7 @@ Three example files for modeling a coastal groundwater system can be found in th
 
 Please cite the following paper if you publish work that uses GromPy-couple:
 
-Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nat Commun 11, 1260 (2020). https://doi.org/10.1038/s41467-020-15064-8 ([link](https://doi.org/10.1038/s41467-020-15064-8))
+Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nature Communications 11, 1260 (2020). https://doi.org/10.1038/s41467-020-15064-8 ([link](https://doi.org/10.1038/s41467-020-15064-8))
 
 
 ## Authors
