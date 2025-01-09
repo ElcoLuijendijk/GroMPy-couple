@@ -1,29 +1,31 @@
 # GroMPy-couple: Coupled density-driven groundwater flow and solute transport model using Python
 
-GroMPy-couple is a 2D cross-sectional model of coupled density-driven groundwater flow and solute transport. The groundwater flow and solute transport euqations are solved by an external finite element model code [Escript/Finley](https://launchpad.net/escript-finley). The exchange between groundwater and baseflow/evapotranspiration simulated using a seepage algorithm. GroMPy-couple includes support for automated runs of series of model experiments using parallel computing.
+GroMPy-couple is a 2D cross-sectional model of coupled density-driven groundwater flow and solute transport. The groundwater flow and solute transport euqations are solved by an external finite element model code [esys-escript](https://github.com/LutzGross/esys-escript.github.io). The exchange between groundwater and baseflow/evapotranspiration simulated using a seepage algorithm. GroMPy-couple includes support for automated runs of series of model experiments using parallel computing.
+
+This code was used to run a large set of models of coastal groundwater discharge, as documented in this paper: Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nat Commun 11, 1260 (2020). [https://doi.org/10.1038/s41467-020-15064-8](https://doi.org/10.1038/s41467-020-15064-8)
 
 ## Getting Started
 
 ### Required modules
 GroMPy-couple requires the following Python modules:
 
-* escript-finley: https://launchpad.net/escript-finley
+* esys-escript: https://github.com/LutzGross/esys-escript.github.io 
 * NumPy:  http://sourceforge.net/projects/numpy/files/NumPy/
 * Pandas: https://pandas.pydata.org
 * For creating figures (optional):
     * Scipy: http://sourceforge.net/projects/scipy/files/scipy/
     * Matplotlib: http://matplotlib.org/downloads.html
 
-These modules are available as standalone packages, follow the links above to download the installation files or use your package manager to install them. For Mac and Windows operating systems an easy way to get a working version of python and these modules is to install free Python distributions that already contain all the necessary modules, such as [Anaconda](https://www.anaconda.com), [Canopy](https://www.enthought.com/products/canopy) or [pythonxy](http://python-xy.github.io). Note that the Windows version of escript has not been updated since 2013 and may not work with the current version of GroMPy-couple.
 
-GroMPy-couple was tested on Ubuntu linux versions 14.04, 16.04 and 18.04 and escript versions 4.0 to 5.1.
 
 ### Installing escript and Grompy 
 * Click the download link on the right for a zip file of the source code, or clone the repository
 * Install escript
-    * get the code here: https://launchpad.net/escript-finley
-    * an installation guide can be found here: http://esys.geocomp.uq.edu.au/docs
+    * get the code here: https://github.com/LutzGross/esys-escript.github.io/releases
+    * an installation guide can be found here: https://github.com/LutzGross/esys-escript.github.io/blob/master/install.pdf 
 * Unzip the GroMPy-couple source code
+
+The latest succefull installs of GroMPy-couple were on Ubuntu linux version 22.04 and escript version 5.10, using the installation / building from source instructions in the manual.
 
 ### Running an example dataset
 * Navigate to the directory where you have installed escript and navigate the src/bin directory 
@@ -34,13 +36,11 @@ GroMPy-couple was tested on Ubuntu linux versions 14.04, 16.04 and 18.04 and esc
 ```
 
 * `grompy_directory` is the directory where you have saved GroMPy-couple. GroMPy-couple will now simulate groundwater flow and coastal groundwater discharge using input parameters stored in the file `model_parameters.py` in the model_input directory.
-* Alternatively you can also run GroMPy-couple directly from the same directory where GroMPy-couple is located by typing `python grompy.py model_input/model_parameters.py`. However for this to work you first need to add a number of variables to your .bashrc or profile file. Go to the escript/bin directory and type `./run-escript -v` to get a list of the items that you have to add (PATH, LD_LIBRARY_PATH, PYTHONPATH and ESCRIPT_NUM_THREADS), and copy-paste them to you barshrc file. After restarting your terminal and you should now be able to run GroMPy-couple directly without using `run-escript`.
+* Alternatively you can also run GroMPy-couple directly from the same directory where GroMPy-couple is located by typing `python grompy.py model_input/model_parameters.py`. However for this to work you first need to add a number of variables to your .bashrc or profile file. Go to the escript/bin directory and type `./run-escript -v` to get a list of the items that you have to add (PATH, LD_LIBRARY_PATH, PYTHONPATH and ESCRIPT_NUM_THREADS), copy-paste them to you barshrc file, and add `EXPORT` before each line. After restarting your terminal and you should now be able to run GroMPy-couple directly without using `run-escript`.
 
 
 ## Model input 
 All model parameters are specified in a single python file. Several examples are located in the directory `model_input`, for instance the default parameters file `model_parameters.py`. Each parameter in the example file is briefly described by a comment above each parameter, starting with the symbol #. Unless specified otherwise all parameters are specified in SI units. 
-
-The model parameter files can be edited using a text editor or to make life easier, with a dedicated python editor, such as [Pycharm](https://www.jetbrains.com/pycharm/), [Geany](https://www.geany.org) or [Spyder](https://pythonhosted.org/spyder/).
 
 The model parameter file is subdivided in three classes: 
 * The first class `ModelOptions` contains a series of options for model runs, which control for example what output files should be generated, where output files should be saved, which processes to model, which solver to use. 
@@ -90,9 +90,15 @@ Three example files for modeling a coastal groundwater system can be found in th
 * `model_parameters_sensitivity.py`: This file contains parameters for a series of model runs to quantify the sensitivity of coastal (submarine and terrestrial) groundwater discharge to controlling parameters such as permeability, recharge, topographic gradient, watershed length and dispersivity. The values of the parameters that will be tested are located in the class `ParameterRanges`, whereas the default parameters are located in the class `ModelParameters`.
 * `model_parameters_combinations.py`: Use this input file to run a large (n=450) series of model runs to explore the parameter space for permeability, topographic gradient and groundwater recharge.
 
+## References
+
+Please cite the following paper if you publish work that uses GromPy-couple:
+
+Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nat Commun 11, 1260 (2020). https://doi.org/10.1038/s41467-020-15064-8 ([link](https://doi.org/10.1038/s41467-020-15064-8))
+
 
 ## Authors
-* **Elco Luijendijk**, <elco.luijendijk@geo.uni-goettingen.de>
+* **Elco Luijendijk**, <elco.luijendijk@uib.no>
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE.txt](LICENSE.txt) file for details.
