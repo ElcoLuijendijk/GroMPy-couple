@@ -82,8 +82,9 @@ The file `model_input/model_parameters_sw_benchmark.py`, contains example input 
  
 The class `ParameterRanges` contains three values for specified pressure at the left and right hand side of the model domain: ``specified_pressures_s = [[0, 68.569], [0, 19.591], [0, 53.876]]``. This will generate three model runs that follow steady state runs 1, 2 and 3 in Goswami and Clement (2007), with specified pressures at the top right-hand node of  68.569, 19.591 and 53.876 Pa, which mimics the specified freshwater heads of 0.267, 0.2655 and 0.262 cm that are applied in the experiment. The pressure at top node at the left hand side of the model is kept at 0. The specified pressure increases hydrostatically with depth below the top node.
 
-The results of the salt-wedge model runs can be compared to experimental results by Goswami and Clement by running the script `compare_salt_wedge_results.py`. This script will read experimental data from a csv file located in the directory `benchmark_data`, and six VTK files that contain the model results and are also located in the same directory. The script generates a figure that is saved as `benchmark_data/model_vs_experiment.pdf`.
+The results of the salt-wedge model runs can be compared to experimental results by Goswami and Clement by running the script `compare_salt_wedge_results.py`. This script will read experimental data from a csv file located in the directory `benchmark_data`, and six VTK files that contain the model results and are also located in the same directory. The script generates a figure that is saved as [benchmark_data/model_vs_experiment.pdf](benchmark_data/model_vs_experiment.pdf).
 
+![](benchmark_data/model_vs_experimental_salt_wedge_small.png)
 
 ### Coastal groundwater discharge
 Three example files for modeling a coastal groundwater system can be found in the `model_input` directory:
