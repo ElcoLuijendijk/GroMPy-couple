@@ -2,7 +2,7 @@
 
 GroMPy-couple is a 2D cross-sectional model of coupled density-driven groundwater flow and solute transport. The groundwater flow and solute transport euqations are solved by an external finite element model code [esys-escript](https://github.com/LutzGross/esys-escript.github.io). The exchange between groundwater and baseflow/evapotranspiration simulated using a seepage algorithm. GroMPy-couple includes support for automated runs of series of model experiments using parallel computing.
 
-This code was used to run a large set of models that simulate coastal groundwater discharge, as documented in this paper: Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nat Commun 11, 1260 (2020). [https://doi.org/10.1038/s41467-020-15064-8](https://doi.org/10.1038/s41467-020-15064-8)
+This code was used to run a large set of model experiments that simulate coastal groundwater discharge, as documented in this paper: Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nat Commun 11, 1260 (2020). [https://doi.org/10.1038/s41467-020-15064-8](https://doi.org/10.1038/s41467-020-15064-8)
 
 ## Getting Started
 
@@ -24,17 +24,17 @@ GroMPy-couple requires the following Python modules:
     * an installation guide can be found here: https://github.com/LutzGross/esys-escript.github.io/blob/master/install.pdf 
 * Unzip the GroMPy-couple source code
 
-The latest succefull installs of GroMPy-couple were on Ubuntu linux version 22.04 and esys-escript version 5.10, using the installation / building from source instructions in the manual.
+The latest succefull installs of GroMPy-couple were on Ubuntu linux version 20.04 and esys-escript version 5.10, using the installation / building from source instructions in the manual.
 
 ### Running an example dataset
-* Navigate to the directory where you have installed escript and navigate the src/bin directory 
+* Navigate to the directory where you have installed escript and navigate to the `src/bin` directory 
 * Execute GroMPy-couple by executing the following command from the command line:
 	
 ```shell
-./run-escript grompy_directory/grompy.py model_input/model_parameters.py
+./run-escript <grompy_directory>/grompy.py model_input/model_parameters.py
 ```
 
-* `grompy_directory` is the directory where you have saved GroMPy-couple. GroMPy-couple will now simulate groundwater flow and coastal groundwater discharge using input parameters stored in the file `model_parameters.py` in the model_input directory.
+* `<grompy_directory>` is the directory where you have saved GroMPy-couple. GroMPy-couple will now simulate groundwater flow and coastal groundwater discharge using input parameters stored in the file `model_parameters.py` in the model_input directory.
 * Alternatively you can also run GroMPy-couple directly from the same directory where GroMPy-couple is located by typing `python grompy.py model_input/model_parameters.py`. However for this to work you first need to add a number of variables to your .bashrc or profile file. Go to the escript/bin directory and type `./run-escript -v` to get a list of the items that you have to add (PATH, LD_LIBRARY_PATH, PYTHONPATH and ESCRIPT_NUM_THREADS), copy-paste them to you barshrc file, and add `EXPORT` before each line. After restarting your terminal and you should now be able to run GroMPy-couple directly without using `run-escript`.
 
 
