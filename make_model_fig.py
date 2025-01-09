@@ -55,7 +55,7 @@ def add_subplot_axes(ax, rect, axisbg='w'):
     width *= rect[2]
     height *= rect[3]
 
-    subax = fig.add_axes([x, y, width, height])#, axisbg=axisbg)
+    subax = fig.add_axes([x, y, width, height])
 
     x_labelsize = subax.get_xticklabels()[0].get_size()
     y_labelsize = subax.get_yticklabels()[0].get_size()
@@ -349,7 +349,8 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
     #fig, ax, cax, tax = gwflow_output.init_figure()
 
     #fig = pl.figure(figsize=(8, 6))
-    fig, axs = pl.subplots(2, 1, gridspec_kw={'height_ratios': [1, 3], 'hspace':0.0}, sharex=True)
+    fig, axs = pl.subplots(2, 1, gridspec_kw={'height_ratios': [1, 3], 'hspace':0.0}, 
+                           sharex=True, figsize=(8,4), layout="constrained")
     tax, ax = axs
 
     for axi in axs:
@@ -359,9 +360,31 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
         axi.get_yaxis().tick_left()
 
     if add_colorbar is True:
-        rect = [0.75, 0.15, 0.3, 0.03]
-        cax2 = add_subplot_axes(ax, rect)#, axisbg='w')
+        #rect = [0.75, 0.15, 0.3, 0.03]
+        rect1 = [0.7, 0.05, 0.3, 0.25]
+        #cax2 = add_subplot_axes(ax, rect)#, axisbg='w')
 
+        #from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+        #cbbox = inset_axes(ax, '30%', '5%', loc = "lower right")
+        cbbox = ax.inset_axes(rect1)
+        [cbbox.spines[k].set_visible(False) for k in cbbox.spines]
+        #cbbox.tick_params(axis='both', left='off', top='off', right='off', bottom='off', labelleft='off', labeltop='off', labelright='off', labelbottom='off')
+        cbbox.tick_params(
+            axis = 'both',
+            left = False,
+            top = False,
+            right = False,
+            bottom = False,
+            labelleft = False,
+            labeltop = False,
+            labelright = False,
+            labelbottom = False
+        )
+
+        cbbox.set_facecolor([1,1,1,0.7])
+
+        cax2 = cbbox.inset_axes([0.1, 0.8, 0.8, 0.15])
+    
     # create polygons
     print('generate polygons for elements')
     polys = [xy_pts[conn_i] for conn_i in conn]
@@ -586,7 +609,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
                 ax.set_ylim(ylim)
                 ax.set_xlabel('Distance (m)')
                 ax.set_ylabel('Elevation (m)')
-                ax.grid()
+                #ax.grid()
 
             if nplot == 0:
 
@@ -637,7 +660,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
                     tax.scatter(xys[:, 0], zs, color='brown', s=2, zorder=1003)
 
                 tax.set_xlim(xlim)
-                tax.grid()
+                #tax.grid()
                 tax.axhline(y=0, color='black', lw=0.5)
                 tax.axvline(x=0, color='black', lw=0.5)
                 tax.set_ylabel('Boundary flux (m/yr)')
@@ -688,7 +711,7 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
 
                 legs = [bnd_flux2, bnd_flux, leg_wt2]
                 labels = ['recharge', 'discharge', 'watertable']
-                tax.legend(legs, labels, frameon=False, loc='upper right', fontsize=leg_fontsize)
+                tax.legend(legs, labels, frameon=False, loc='upper right', fontsize=leg_fontsize, ncol=3)
 
             # save regular figure:
             file_basename = ''.join(vtk_file.split('.')[:-1])
@@ -697,7 +720,6 @@ for vtk_file, vtkf_file in zip(vtk_files[::-1], vtkf_files[::-1]):
             else:
                 fig_fn = file_basename + '_' + pt_var_name \
                          + ['x', 'y', 'z'][vdim] + figure_type
-
 
             fn_out = os.path.join(fig_folder, fig_fn)
             #fn_out_alt = os.path.join(fig_folder_alt, fig_fn)
