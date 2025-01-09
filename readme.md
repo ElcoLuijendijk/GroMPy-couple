@@ -4,6 +4,9 @@ GroMPy-couple is a 2D cross-sectional model of coupled density-driven groundwate
 
 This code was used to run a large set of model experiments that simulate coastal groundwater discharge, as documented in this paper: Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nat Commun 11, 1260 (2020). [https://doi.org/10.1038/s41467-020-15064-8](https://doi.org/10.1038/s41467-020-15064-8)
 
+![](fig/model_example_fig_small.png)
+
+
 ## Getting Started
 
 ### Required modules
