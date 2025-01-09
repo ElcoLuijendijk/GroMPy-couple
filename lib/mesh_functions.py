@@ -397,6 +397,8 @@ def setup_standard_mesh(Parameters, mesh_filename):
     #                         (41.0 * Parameters.topo_gradient))
 
 
+    if Parameters.topo_break == False:
+        Parameters.topo_gradient_hinterland = Parameters.topo_gradient
 
     ###############################
     # use gmsh to construct domain
