@@ -2,7 +2,7 @@
 
 GroMPy-couple is a 2D cross-sectional model of coupled density-driven groundwater flow and solute transport. The groundwater flow and solute transport euqations are solved by an external finite element model code [esys-escript](https://github.com/LutzGross/esys-escript.github.io). The exchange between groundwater and baseflow/evapotranspiration simulated using a seepage algorithm. GroMPy-couple includes support for automated runs of series of model experiments using parallel computing.
 
-This code was used to run a large set of models of coastal groundwater discharge, as documented in this paper: Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nat Commun 11, 1260 (2020). [https://doi.org/10.1038/s41467-020-15064-8](https://doi.org/10.1038/s41467-020-15064-8)
+This code was used to run a large set of models that simulate coastal groundwater discharge, as documented in this paper: Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nat Commun 11, 1260 (2020). [https://doi.org/10.1038/s41467-020-15064-8](https://doi.org/10.1038/s41467-020-15064-8)
 
 ## Getting Started
 
@@ -17,7 +17,6 @@ GroMPy-couple requires the following Python modules:
     * Matplotlib: http://matplotlib.org/downloads.html
 
 
-
 ### Installing escript and Grompy 
 * Click the download link on the right for a zip file of the source code, or clone the repository
 * Install escript
@@ -25,7 +24,7 @@ GroMPy-couple requires the following Python modules:
     * an installation guide can be found here: https://github.com/LutzGross/esys-escript.github.io/blob/master/install.pdf 
 * Unzip the GroMPy-couple source code
 
-The latest succefull installs of GroMPy-couple were on Ubuntu linux version 22.04 and escript version 5.10, using the installation / building from source instructions in the manual.
+The latest succefull installs of GroMPy-couple were on Ubuntu linux version 22.04 and esys-escript version 5.10, using the installation / building from source instructions in the manual.
 
 ### Running an example dataset
 * Navigate to the directory where you have installed escript and navigate the src/bin directory 
