@@ -1,5 +1,7 @@
 # GroMPy-couple: Coupled density-driven groundwater flow and solute transport model using Python
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.2616534.svg)](https://doi.org/10.5281/zenodo.2616534)
+
 GroMPy-couple is a 2D cross-sectional model of coupled density-driven groundwater flow and solute transport. The groundwater flow and solute transport euqations are solved by an external finite element model code [esys-escript](https://github.com/LutzGross/esys-escript.github.io). The exchange between groundwater and baseflow/evapotranspiration simulated using a seepage algorithm. GroMPy-couple includes support for automated runs of series of model experiments using parallel computing.
 
 This code was used to run a large set of model experiments that simulate coastal groundwater discharge, as documented in this paper: Luijendijk, E., Gleeson, T. & Moosdorf, N. Fresh groundwater discharge insignificant for the world’s oceans but important for coastal ecosystems. Nat Commun 11, 1260 (2020). [https://doi.org/10.1038/s41467-020-15064-8](https://doi.org/10.1038/s41467-020-15064-8)
