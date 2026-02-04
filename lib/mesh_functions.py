@@ -1,16 +1,45 @@
 """
 functions to create escript meshes for grompy-salt
- 
+
+This module provides mesh creation functions using esys-escript (pycad, gmsh, finley).
+If escript is not installed, the module can still be imported but the functions
+will raise RuntimeError with a helpful message directing users to use the FiPy backend.
 """
 
 import os
 import sys
 import math
 import numpy as np
-import esys.pycad as pc
-import esys.pycad.gmsh as gmsh
-import esys.finley as fl
-import esys.escript as es
+
+# Try to import escript - make imports conditional so module can be imported without escript
+ESCRIPT_AVAILABLE = False
+pc = None
+gmsh = None
+fl = None
+es = None
+
+try:
+    import esys.pycad as pc
+    import esys.pycad.gmsh as gmsh
+    import esys.finley as fl
+    import esys.escript as es
+    ESCRIPT_AVAILABLE = True
+except ImportError:
+    pass
+
+
+def _check_escript_available(func_name):
+    """
+    Check if escript is available and raise helpful error if not.
+    """
+    if not ESCRIPT_AVAILABLE:
+        raise RuntimeError(
+            f"{func_name} requires esys-escript which is not installed.\n"
+            f"Options:\n"
+            f"  1. Install esys-escript: https://esys-escript.github.io/\n"
+            f"  2. Use the FiPy backend instead: set ModelOptions.backend = 'fipy' in your model parameters\n"
+            f"     The FiPy backend does not require escript and uses FiPy's finite volume solver."
+        )
 
 
 
@@ -22,6 +51,7 @@ def setup_coastal_mesh_glover1959(Parameters,
     The middle block is centered around the fresh-salt water interface, which is calculated using an anlytical
     solution by Glover (1959) Journal of Geophys. Res.
     """
+    _check_escript_available('setup_coastal_mesh_glover1959')
 
     # if Parameters.topo_gradient == 0:
     #    extent_salt_water = 0
@@ -181,6 +211,7 @@ def setup_coastal_mesh(Parameters,
     The middle block is centered around the fresh-salt water interface, which is calculated using the
     Ghyben-Herzberg equation.
     """
+    _check_escript_available('setup_coastal_mesh')
 
     #if Parameters.topo_gradient == 0:
     #    extent_salt_water = 0
@@ -369,6 +400,8 @@ def setup_rectangular_mesh(Parameters,
     """
     Create a rectangular mesh.
     """
+    _check_escript_available('setup_rectangular_mesh')
+    
     nx = int(math.ceil(Parameters.L / Parameters.cellsize_x))
     ny = int(math.ceil(Parameters.thickness / Parameters.cellsize_y))
     mesh = fl.Rectangle(l0=Parameters.L, l1=Parameters.thickness,
@@ -389,6 +422,7 @@ def setup_standard_mesh(Parameters, mesh_filename):
     Create a mesh with bi-linear surface topography
 
     """
+    _check_escript_available('setup_standard_mesh')
 
     # if Parameters.topo_gradient == 0:
     #    extent_salt_water = 0

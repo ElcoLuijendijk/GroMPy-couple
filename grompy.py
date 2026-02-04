@@ -1,7 +1,9 @@
 """
 Grompy: numerical model of coupled density-driven groundwater flow & solute transport in coastal aquifers.
 
-The fluid flow equation and solute transport eq. solved with the generic finite element code escript/Finley
+The fluid flow equation and solute transport eq. solved with either:
+- esys-escript/Finley (Finite Element Method) - default
+- FiPy (Finite Volume Method) - alternative backend
 
 Example
 ------
@@ -12,6 +14,11 @@ following command::
 
 Where grompy_dir is the directory where this script is located and model_parameters.py is a python file containing all
 model parameters. See the subdirectory model_input for examples of model parameter files.
+
+To use the FiPy backend, set ModelOptions.backend = 'fipy' in your model parameters file,
+or run directly with Python (no escript wrapper needed)::
+
+    $ python grompy_dir/grompy.py model_parameters.py
 
 :Authors:
     Elco Luijendijk <elco.luijendijk@geo.uni-goettingen.de>
@@ -24,18 +31,137 @@ import os
 import inspect
 import datetime
 import random
-import imp
+import importlib.util
+import importlib.machinery
 
 import numpy as np
 import pandas as pd
 
-import esys.escript as es
-import esys.escript.linearPDEs
-import esys.weipa
+
+def load_module_from_file(module_name, file_path):
+    """
+    Load a Python module from a file path.
+    
+    This is a replacement for the deprecated imp.load_source() function,
+    compatible with Python 3.5+.
+    
+    Parameters
+    ----------
+    module_name : str
+        Name to assign to the loaded module
+    file_path : str
+        Path to the Python file to load
+        
+    Returns
+    -------
+    module
+        The loaded Python module
+        
+    Raises
+    ------
+    ImportError
+        If the module cannot be loaded
+    """
+    loader = importlib.machinery.SourceFileLoader(module_name, file_path)
+    spec = importlib.util.spec_from_file_location(module_name, file_path, loader=loader)
+    if spec is None:
+        raise ImportError(f"Cannot load module spec from {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    if spec.loader is None:
+        raise ImportError(f"Cannot get loader for {file_path}")
+    spec.loader.exec_module(module)
+    return module
+
+
+# Check which backends are available
+ESCRIPT_AVAILABLE = False
+FIPY_AVAILABLE = False
+
+try:
+    import esys.escript as es
+    import esys.escript.linearPDEs
+    import esys.weipa
+    ESCRIPT_AVAILABLE = True
+except ImportError:
+    print('Note: esys-escript not available')
+
+try:
+    from lib.backend import check_backend_available
+    FIPY_AVAILABLE = check_backend_available('fipy')
+except ImportError:
+    pass
 
 # local libraries
 import lib.grompy_lib as grompy_salt_lib
-import lib.mesh_functions as mesh_functions
+
+# Mesh functions will be imported conditionally based on backend
+# See get_mesh_functions() below
+mesh_functions = None  # Will be set at runtime
+
+# Import FiPy implementation if available
+if FIPY_AVAILABLE:
+    try:
+        import lib.grompy_fipy as grompy_fipy
+    except ImportError:
+        FIPY_AVAILABLE = False
+
+
+def get_mesh_functions(backend_name):
+    """
+    Get the appropriate mesh functions module based on the backend.
+    
+    Parameters
+    ----------
+    backend_name : str
+        'escript' or 'fipy'
+        
+    Returns
+    -------
+    module
+        The mesh_functions module (either escript or fipy version)
+    """
+    global mesh_functions
+    
+    if backend_name == 'fipy':
+        import lib.mesh_functions_fipy as mesh_functions
+        return mesh_functions
+    else:
+        import lib.mesh_functions as mesh_functions
+        return mesh_functions
+
+
+def get_backend_name(ModelOptions):
+    """
+    Determine which backend to use based on ModelOptions and availability.
+    
+    Parameters
+    ----------
+    ModelOptions : object
+        Model options object with 'backend' attribute
+    
+    Returns
+    -------
+    str
+        Backend name ('escript' or 'fipy')
+    """
+    requested = getattr(ModelOptions, 'backend', 'escript').lower()
+    
+    if requested == 'fipy':
+        if FIPY_AVAILABLE:
+            return 'fipy'
+        else:
+            print("Warning: FiPy backend requested but not available. Falling back to escript.")
+            if not ESCRIPT_AVAILABLE:
+                raise ImportError("Neither escript nor FiPy backends are available!")
+            return 'escript'
+    else:
+        if ESCRIPT_AVAILABLE:
+            return 'escript'
+        elif FIPY_AVAILABLE:
+            print("Warning: escript not available. Using FiPy backend instead.")
+            return 'fipy'
+        else:
+            raise ImportError("Neither escript nor FiPy backends are available!")
 
 
 def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
@@ -83,10 +209,9 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
         print(f"creating new directory for {model_output_folder} for model output")
         os.makedirs(model_output_folder)
 
-    # set filename for mesh
-    mesh_fn = os.path.join(scriptdir,
-                           'model_output',
-                           '_%i_%s.msh' % (random.randint(0, 100), '%s.msh' % scenario_name))
+    # set filename for mesh (use model_output_folder to keep mesh with outputs)
+    mesh_fn = os.path.join(model_output_folder,
+                           '_%i_%s.msh' % (random.randint(0, 100), scenario_name))
 
     # get names and values of input parameters
     attributes = inspect.getmembers(
@@ -125,15 +250,52 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     df.loc[run, 'start_date'] = start_date_str
     df.loc[run, 'start_time'] = start_time_str
 
+    # Determine which backend to use
+    backend_name = get_backend_name(ModelOptions)
+    df.loc[run, 'backend'] = backend_name
+    
     # run a single model scenario
-    model_results = grompy_salt_lib.run_model_scenario(
-        scenario_name,
-        model_output_folder,
-        model_file_adj,
-        ModelOptions,
-        Parameters,
-        mesh_function,
-        mesh_fn)
+    if backend_name == 'fipy':
+        # Use FiPy backend
+        print(f"Running model with FiPy backend")
+        
+        # Create mesh first using the mesh function
+        print('Creating mesh...')
+        mesh, surface, sea_surface, seawater, z_surface = mesh_function(Parameters, mesh_fn)
+        print(f'Mesh created: {mesh.numberOfCells} cells')
+        
+        model_results = grompy_fipy.run_coupled_flow_model_fipy(
+            Parameters, ModelOptions, mesh_fn)
+        
+        # Convert FiPy results to a compatible format for downstream processing
+        # Note: FiPy returns a simplified result dict, so we need to handle this
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        df.loc[run, 'computing_runtime_sec'] = runtime.total_seconds()
+        
+        # Store basic results
+        df.loc[run, 'final_runtime_sec'] = model_results['runtime']
+        df.loc[run, 'final_timesteps'] = model_results['timesteps']
+        df.loc[run, 'pressure_min'] = model_results['pressure'].min()
+        df.loc[run, 'pressure_max'] = model_results['pressure'].max()
+        df.loc[run, 'concentration_min'] = model_results['concentration'].min()
+        df.loc[run, 'concentration_max'] = model_results['concentration'].max()
+        
+        print(f"FiPy model run complete")
+        print(f"Runtime: {model_results['runtime'] / (365.25 * 24 * 60 * 60):.2f} years")
+        print(f"Timesteps: {model_results['timesteps']}")
+        
+        return df
+    else:
+        # Use escript backend (original implementation)
+        model_results = grompy_salt_lib.run_model_scenario(
+            scenario_name,
+            model_output_folder,
+            model_file_adj,
+            ModelOptions,
+            Parameters,
+            mesh_function,
+            mesh_fn)
 
     end_time = datetime.datetime.now()
     runtime = end_time - start_time
@@ -414,7 +576,7 @@ def main():
         print('model input files: ', inp_file_loc)
 
         try:
-            model_parameters = imp.load_source('model_parameters', inp_file_loc)
+            model_parameters = load_module_from_file('model_parameters', inp_file_loc)
         except IOError:
             msg = 'cannot find parameter file %s' % inp_file_loc
             raise IOError(msg)
@@ -432,6 +594,11 @@ def main():
         from model_input.model_parameters import ParameterRanges
 
     scenario_name = ModelOptions.scenario_name
+
+    # Determine backend and get appropriate mesh functions module
+    backend_name = get_backend_name(ModelOptions)
+    mesh_functions = get_mesh_functions(backend_name)
+    print(f'Using {backend_name} backend')
 
     # select function to create mesh:
     if ModelParameters.mesh_type == 'coastal':
@@ -487,7 +654,7 @@ def main():
         scenario_param_names = ["base"]
         model_scenario_names = ["base"]
 
-    elif ModelOptions.model_scenario_list is not 'file':
+    elif ModelOptions.model_scenario_list != 'file':
 
         # get names of scenario parameters
         # import model parameter ranges
@@ -501,7 +668,7 @@ def main():
                                    for p in scenario_param_names]
 
         # construct list with all parameter combinations
-        if ModelOptions.model_scenario_list is 'combinations':
+        if ModelOptions.model_scenario_list == 'combinations':
             scenario_parameter_combinations = \
                 list(itertools.product(*scenario_parameter_list))
         else:

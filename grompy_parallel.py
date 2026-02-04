@@ -22,7 +22,8 @@ import os
 import inspect
 import datetime
 import random
-import imp
+import importlib.util
+import importlib.machinery
 import time
 
 import numpy as np
@@ -39,11 +40,46 @@ import lib.grompy_lib as grompy_salt_lib
 import lib.mesh_functions as mesh_functions
 
 
+def load_module_from_file(module_name, file_path):
+    """
+    Load a Python module from a file path.
+    
+    This is a replacement for the deprecated imp.load_source() function,
+    compatible with Python 3.5+.
+    
+    Parameters
+    ----------
+    module_name : str
+        Name to assign to the loaded module
+    file_path : str
+        Path to the Python file to load
+        
+    Returns
+    -------
+    module
+        The loaded Python module
+        
+    Raises
+    ------
+    ImportError
+        If the module cannot be loaded
+    """
+    loader = importlib.machinery.SourceFileLoader(module_name, file_path)
+    spec = importlib.util.spec_from_file_location(module_name, file_path, loader=loader)
+    if spec is None:
+        raise ImportError(f"Cannot load module spec from {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    if spec.loader is None:
+        raise ImportError(f"Cannot get loader for {file_path}")
+    spec.loader.exec_module(module)
+    return module
+
+
 def info(title):
-    print title
-    print 'module name:', __name__
-    print 'parent process:', os.getppid()
-    print 'process id:', os.getpid()
+    print(title)
+    print('module name:', __name__)
+    print('parent process:', os.getppid())
+    print('process id:', os.getpid())
 
 
 def run_model_scenario_and_analyze_results(output, Parameters, ModelOptions,
@@ -68,9 +104,9 @@ def run_model_scenario_and_analyze_results(output, Parameters, ModelOptions,
     run_id = 'S%i' % run
     #scenario_name = run_id
 
-    print '-' * 30
-    print 'model scenario id %s, run %i of %i' % (run_id, run + 1, nscenarios)
-    print '-' * 30
+    print('-' * 30)
+    print('model scenario id %s, run %i of %i' % (run_id, run + 1, nscenarios))
+    print('-' * 30)
 
     model_file_adj += 'run%s' % run_id
 
@@ -82,10 +118,10 @@ def run_model_scenario_and_analyze_results(output, Parameters, ModelOptions,
             # find model parameter name to adjust
             model_param_name = scenario_param_name[:-2]
 
-            print 'updating parameter %s from %s to %s' \
+            print('updating parameter %s from %s to %s'
                   % (model_param_name,
                      str(getattr(Parameters, model_param_name)),
-                     str(scenario_parameter))
+                     str(scenario_parameter)))
 
             # update model parameter
             setattr(Parameters, model_param_name, scenario_parameter)
@@ -151,7 +187,7 @@ def run_model_scenario_and_analyze_results(output, Parameters, ModelOptions,
     runtime = end_time - start_time
     df.ix[run, 'computing_runtime_sec'] = runtime.total_seconds()
 
-    print 'processing model results'
+    print('processing model results')
     # get model results
     (mesh, surface, sea_surface, k_vector, P, Conc,
      rho_f, viscosity, h, q, q_abs, nodal_flux,
@@ -289,7 +325,7 @@ def run_model_scenario_and_analyze_results(output, Parameters, ModelOptions,
 
         fn_VTK = os.path.join(vtk_folder,
                               '%s_final_output.vtu' % model_file_adj)
-        print 'saving vtk file of model results: %s' % fn_VTK
+        print('saving vtk file of model results: %s' % fn_VTK)
 
         nodata = -99999
         flux_surface_plot = nodal_flux * surface + \
@@ -347,7 +383,7 @@ def run_model_scenario_and_analyze_results(output, Parameters, ModelOptions,
             for x, y, vai in zip(xya[:, 0], xya[:, 1], va):
                 csv_str += '%0.3f,%0.3f,%0.3e\n' % (x, y, vai)
 
-            print 'writing final variable %s to file %s' % (varlabel, filename)
+            print('writing final variable %s to file %s' % (varlabel, filename))
 
             fout = open(filename, 'w')
             fout.write(csv_str)
@@ -381,7 +417,7 @@ def run_model_scenario_and_analyze_results(output, Parameters, ModelOptions,
     filename = os.path.join(diff_folder,
                             'P_and_C_changes_%s_final.csv' % model_file_adj)
 
-    print 'saving P and C changes to %s' % filename
+    print('saving P and C changes to %s' % filename)
     df_diff.to_csv(filename, index_label='timestep')
 
     dfo = df.loc[[run]]
@@ -398,7 +434,7 @@ def run_model_scenario_and_analyze_results(output, Parameters, ModelOptions,
                             'individual_model_results_%s_%s_run_%s_of_%i.csv'
                             % (scenario_name, today_str, str(run), nscenarios))
 
-    print 'saving model run input & output data to %s' % filename
+    print('saving model run input & output data to %s' % filename)
     dfo.to_csv(filename, index_label='model_run')
 
     # store output in multiprocessing queue
@@ -425,7 +461,7 @@ def main():
 
     scriptdir = os.path.dirname(os.path.realpath(__file__))
 
-    print ''
+    print('')
 
     if len(sys.argv) > 1 and sys.argv[-1][-14:] != 'grompy.py':
         #scenario_name = sys.argv[-1]
@@ -433,10 +469,10 @@ def main():
         #                                     scenario_name)
         inp_file_loc = os.path.join(scriptdir, sys.argv[-1])
 
-        print 'model input files: ', inp_file_loc
+        print('model input files: ', inp_file_loc)
 
         try:
-            model_parameters = imp.load_source('model_parameters', inp_file_loc)
+            model_parameters = load_module_from_file('model_parameters', inp_file_loc)
         except IOError:
             msg = 'cannot find parameter file %s' % inp_file_loc
             raise IOError(msg)
@@ -447,8 +483,8 @@ def main():
 
     else:
 
-        print 'running model input data from file ' \
-              'model_input/model_parameters.py'
+        print('running model input data from file '
+              'model_input/model_parameters.py')
 
         from model_input.model_parameters import ModelParameters, ModelOptions
         from model_input.model_parameters import ParameterRanges
@@ -465,9 +501,9 @@ def main():
         mesh_function = mesh_functions.setup_rectangular_mesh
 
     # run multiple model scenarios
-    print '=' * 35
-    print 'running model scenarios:'
-    print '=' * 35
+    print('=' * 35)
+    print('running model scenarios:')
+    print('=' * 35)
 
     # select folder to save results
     model_output_folder = ModelOptions.model_output_dir
@@ -489,9 +525,9 @@ def main():
             latest_output_file = os.path.join(model_output_folder,
                                               output_files[-1][1])
 
-            print 'found existing model runs file %s in folder %s' \
-                  % (latest_output_file, model_output_folder)
-            print 'will append new model results'
+            print('found existing model runs file %s in folder %s'
+                  % (latest_output_file, model_output_folder))
+            print('will append new model results')
 
             dfo = pd.read_csv(latest_output_file)
 
@@ -500,7 +536,7 @@ def main():
             firstrun_str = [f for f in firstrun_lst if str(f)[0] == 'S'][-1]
             firstrun = int(firstrun_str[1:]) + 1
 
-            print 'numbering new model runs starting at %i' % firstrun
+            print('numbering new model runs starting at %i' % firstrun)
 
     if ModelOptions.model_scenario_list is not 'file':
 
@@ -554,7 +590,7 @@ def main():
 
     #
     if ModelOptions.invert_model_run_order is True:
-        print 'reversing order of parameter combinations'
+        print('reversing order of parameter combinations')
         scenario_parameter_combinations = scenario_parameter_combinations[::-1]
 
     # read default model parameter file
@@ -587,7 +623,7 @@ def main():
 
     results = []
 
-    print 'number of cores available: ', multiprocessing.cpu_count()
+    print('number of cores available: ', multiprocessing.cpu_count())
 
     max_proc = ModelOptions.max_proc
 
@@ -617,17 +653,17 @@ def main():
         processes.append(p)
 
         if (len(multiprocessing.active_children()) -1) < max_proc:
-            print 'starting a new process'
+            print('starting a new process')
             p.start()
             active_proc += 1
-            print 'number of active processes is now ', (len(multiprocessing.active_children()) -1), active_proc
+            print('number of active processes is now ', (len(multiprocessing.active_children()) -1), active_proc)
 
         else:
             proc_close_count = 0
             while (len(multiprocessing.active_children()) -1) >= max_proc:
 
                 if actively_close_processes is True:
-                    print 'waiting for process to close before starting a new one'
+                    print('waiting for process to close before starting a new one')
 
                     if processes[proc_close_count].is_alive() is True:
                         processes[proc_close_count].join()
@@ -638,7 +674,7 @@ def main():
                     pass
                     #wait
 
-            print 'done, starting a new process'
+            print('done, starting a new process')
             p.start()
             active_proc += 1
 
@@ -658,19 +694,19 @@ def main():
         fout.write(output_txt)
         fout.close()
 
-    print 'number of active processes is ', multiprocessing.active_children(), active_proc
+    print('number of active processes is ', multiprocessing.active_children(), active_proc)
     for i, pf in enumerate(processes):
         if pf.is_alive() is True:
-            print 'process %i is alive, waiting to finalize' % i
+            print('process %i is alive, waiting to finalize' % i)
             pf.join()
 
     # get the results
-    print 'done running models, waiting for results'
+    print('done running models, waiting for results')
     for i, p in enumerate(processes):
         try:
             results.append(output.get(timeout=output_timeout))
         except:
-            print 'warning, could not get output for process %i' % i
+            print('warning, could not get output for process %i' % i)
 
     # add columns to df
     #dfo = results[0]
@@ -692,12 +728,12 @@ def main():
     if os.path.exists(filename):
         backup_filename = filename + '_backup'
         os.rename(filename, backup_filename)
-        print 'moved previous input & output data to %s' % backup_filename
+        print('moved previous input & output data to %s' % backup_filename)
 
-    print 'saved final results as %s' % filename
+    print('saved final results as %s' % filename)
     dfo.to_csv(filename)
 
-    print 'done'
+    print('done')
 
 if __name__ == "__main__":
     main()

@@ -635,7 +635,8 @@ def depth_sw_interface_Glover1959(x, k, viscosity, hydr_gradient, thickness, rho
     y2 = 2 * Q / (gamma * K) * x + Q**2 / (gamma**2 * K**2)
 
     # get rid of < 0 values:
-    y2_fix = es.wherePositive(y2) * y2
+    # Use numpy for compatibility with both escript and FiPy backends
+    y2_fix = np.maximum(y2, 0)
 
     depth = y2_fix**0.5
 
