@@ -33,7 +33,7 @@ from lib.backend.fipy_backend import FiPyBackend, FiPyField, FiPyMesh, FiPyPDESo
 
 try:
     import fipy
-    from fipy import CellVariable, DiffusionTerm, ConvectionTerm, TransientTerm
+    from fipy import CellVariable, FaceVariable, DiffusionTerm, ConvectionTerm, TransientTerm
     FIPY_AVAILABLE = True
 except ImportError:
     FIPY_AVAILABLE = False
@@ -84,6 +84,60 @@ def calculate_fluid_density(concentration, gamma, rho_f_0):
         Fluid density
     """
     return rho_f_0 * (1.0 + gamma * concentration)
+
+
+def calculate_darcy_velocity_fipy(fipy_mesh, pressure, density, k_tensor, viscosity, g):
+    """
+    Calculate Darcy velocity from pressure field.
+    
+    Darcy's law with gravity:
+    q = -k/mu * (grad(P) - rho*g)
+    
+    where g is the gravity vector pointing in -y direction.
+    
+    Parameters
+    ----------
+    fipy_mesh : fipy.Mesh
+        The FiPy mesh object
+    pressure : np.ndarray
+        Pressure field (cell-centered)
+    density : np.ndarray
+        Fluid density field (cell-centered)
+    k_tensor : tuple
+        Permeability tensor ((kxx, kxy), (kyx, kyy))
+    viscosity : float
+        Fluid viscosity (Pa.s)
+    g : float
+        Gravitational acceleration (m/s²)
+    
+    Returns
+    -------
+    FaceVariable
+        Darcy velocity vector at cell faces (rank-1)
+    """
+    # Create cell variables for pressure and density
+    P = CellVariable(mesh=fipy_mesh, value=pressure)
+    rho = CellVariable(mesh=fipy_mesh, value=density)
+    
+    # Get density at faces (arithmetic average of neighboring cells)
+    rho_face = rho.arithmeticFaceValue
+    
+    # Pressure gradient at faces
+    grad_P = P.faceGrad  # Shape: (2, nFaces)
+    
+    # Gravity vector (pointing in -y direction, i.e., downward)
+    g_vector = FaceVariable(mesh=fipy_mesh, rank=1, value=[[0.], [-g]])
+    
+    # Effective isotropic permeability (geometric mean)
+    # Note: FiPy has issues with anisotropic tensor + ImplicitSourceTerm
+    kxx = k_tensor[0][0]
+    kyy = k_tensor[1][1]
+    k_eff = np.sqrt(kxx * kyy)
+    
+    # Darcy velocity: q = -k/mu * (grad(P) - rho*g)
+    q = -(k_eff / viscosity) * (grad_P - rho_face * g_vector)
+    
+    return q
 
 
 def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
@@ -417,8 +471,12 @@ def solve_solute_transport_fipy(
                                 value=initial_conc)
     
     # Calculate Darcy velocity from pressure gradient
-    # q = -k/mu * (grad(P) - rho*g)
-    # For now, use simplified isotropic diffusion for transport
+    q = calculate_darcy_velocity_fipy(
+        fipy_mesh, pressure, density, k_tensor, viscosity, g
+    )
+    
+    # Pore velocity = Darcy velocity / porosity
+    velocity = q / porosity
     
     # Effective diffusion coefficient (simplified - ignoring dispersion tensor)
     D_eff = porosity * diffusivity + l_disp  # Simplified
@@ -437,12 +495,14 @@ def solve_solute_transport_fipy(
         constraint_source.setValue(-large_value * specified_concentration, where=spec_conc_mask)
         
         eq = (TransientTerm(coeff=porosity) 
+              + ConvectionTerm(coeff=velocity)
               == DiffusionTerm(coeff=D_eff)
               + ImplicitSourceTerm(coeff=constraint_coeff)
               - constraint_source)
     else:
-        eq = (TransientTerm(coeff=porosity) == 
-              DiffusionTerm(coeff=D_eff))
+        eq = (TransientTerm(coeff=porosity) 
+              + ConvectionTerm(coeff=velocity)
+              == DiffusionTerm(coeff=D_eff))
     
     # Solve for one timestep
     eq.solve(var=concentration, dt=dt)
