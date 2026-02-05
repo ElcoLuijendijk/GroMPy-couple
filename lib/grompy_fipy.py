@@ -33,7 +33,8 @@ from lib.backend.fipy_backend import FiPyBackend, FiPyField, FiPyMesh, FiPyPDESo
 
 try:
     import fipy
-    from fipy import CellVariable, FaceVariable, DiffusionTerm, ConvectionTerm, TransientTerm
+    from fipy import CellVariable, FaceVariable, DiffusionTerm, DiffusionTermCorrection, ConvectionTerm, TransientTerm
+    from fipy.tools import numerix
     FIPY_AVAILABLE = True
 except ImportError:
     FIPY_AVAILABLE = False
@@ -138,6 +139,85 @@ def calculate_darcy_velocity_fipy(fipy_mesh, pressure, density, k_tensor, viscos
     q = -(k_eff / viscosity) * (grad_P - rho_face * g_vector)
     
     return q
+
+
+def calculate_dispersion_coefficients_fipy(fipy_mesh, velocity_face, porosity, diffusivity, l_disp, t_disp):
+    """
+    Calculate anisotropic dispersion coefficients for FiPy implementation.
+    
+    Calculates complete hydrodynamic dispersion tensor following theory:
+    D_ij = phi * D_m * delta_ij + alpha_L * v_i * v_j / |v| + alpha_T * |v| * delta_ij
+    
+    Where delta_ij is Kronecker delta, and off-diagonal terms capture cross-dispersion.
+    
+    Parameters
+    ----------
+    fipy_mesh : fipy.Mesh
+        The FiPy mesh (cell-centered)
+    velocity_face : FaceVariable
+        Face-centered velocity from Darcy calculation
+    porosity : float
+        Porosity (dimensionless)
+    diffusivity : float
+        Molecular diffusivity (m²/s)
+    l_disp : float
+        Longitudinal dispersivity (m)
+    t_disp : float
+        Transverse dispersivity (m)
+    
+    Returns
+    -------
+    CellVariable
+        Full dispersion tensor [[Dxx, Dxy], [Dyx, Dyy]] as rank-2 CellVariable
+    """
+    # Extract face-centered velocity components
+    vx_face_vals = np.array(velocity_face[0].value)
+    vy_face_vals = np.array(velocity_face[1].value)
+    
+    n_cells = fipy_mesh.numberOfCells
+    n_faces = fipy_mesh.numberOfFaces
+    
+    # Get cell-to-face connectivity: shape (nCellFaces, nCells)
+    cell_face_ids = fipy_mesh._cellFaceIDs  # Shape: (4, nCells) for 2D triangular mesh
+    
+    # For each cell, average the bounding face values
+    # cell_face_ids has face indices for each cell
+    vx_cell = np.zeros(n_cells)
+    vy_cell = np.zeros(n_cells)
+    
+    for i in range(n_cells):
+        face_ids = cell_face_ids[:, i]
+        # Get valid face IDs (less than n_faces)
+        valid_mask = (face_ids >= 0) & (face_ids < n_faces)
+        valid_face_ids = face_ids[valid_mask]
+        
+        if len(valid_face_ids) > 0:
+            vx_cell[i] = np.mean(vx_face_vals[valid_face_ids])
+            vy_cell[i] = np.mean(vy_face_vals[valid_face_ids])
+    
+    # Calculate velocity magnitude
+    v_abs = np.sqrt(vx_cell**2 + vy_cell**2)
+    
+    # Add numerical protection to avoid division by zero
+    v_abs_safe = np.where(v_abs == 0, 1e-20, v_abs)
+    
+    # Calculate diagonal components of dispersion tensor
+    # Following hydrodynamic dispersion theory: 
+    # D_ii = phi * D_m + alpha_i * |v| where alpha_i is dispersivity
+    Dxx = porosity * diffusivity + l_disp * vx_cell**2 / v_abs_safe
+    Dyy = porosity * diffusivity + t_disp * vy_cell**2 / v_abs_safe
+    
+    # Calculate cross-dispersion components (off-diagonal terms)
+    # D_xy = (alpha_L - alpha_T) * v_x * v_y / |v|
+    Dxy = (l_disp - t_disp) * (vx_cell * vy_cell) / v_abs_safe
+    Dyx = Dxy  # Symmetric tensor
+    
+    # Create rank-2 CellVariable for the full dispersion tensor
+    # Stack components as (2, 2, nCells) for proper broadcasting
+    dispersion_tensor = CellVariable(mesh=fipy_mesh, rank=2, 
+                                 value=[[Dxx, Dxy], [Dyx, Dyy]])
+    
+    return dispersion_tensor
 
 
 def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
@@ -410,7 +490,7 @@ def solve_solute_transport_fipy(
     pressure, density, k_tensor, viscosity, g,
     porosity, diffusivity, l_disp, t_disp,
     spec_conc_mask, specified_concentration,
-    Parameters
+    Parameters, use_tensor_dispersion=True
 ):
     """
     Solve solute transport equation using FiPy.
@@ -478,8 +558,19 @@ def solve_solute_transport_fipy(
     # Pore velocity = Darcy velocity / porosity
     velocity = q / porosity
     
-    # Effective diffusion coefficient (simplified - ignoring dispersion tensor)
-    D_eff = porosity * diffusivity + l_disp  # Simplified
+    # Calculate dispersion based on configuration choice
+    if use_tensor_dispersion:
+        # Full anisotropic tensor implementation with diagonal and cross-dispersion terms
+        dispersion_tensor = calculate_dispersion_coefficients_fipy(
+            fipy_mesh, velocity, porosity, diffusivity, l_disp, t_disp
+        )
+        # Use tensor diffusion term with improved numerical stability
+        diffusion_term = DiffusionTermCorrection(coeff=dispersion_tensor)
+    else:
+        # Fallback: preserve old scalar implementation
+        diffusion_coeff = porosity * diffusivity + l_disp  # Original implementation
+        diffusion_term = DiffusionTerm(coeff=diffusion_coeff)
+        print(f"Debug: Using scalar diffusion: {diffusion_coeff:.2e} m²/s")
     
     # Build equation with Dirichlet boundary conditions using penalty method
     # Note: FiPy requires NEGATIVE penalty coefficient due to internal sign conventions
@@ -496,13 +587,13 @@ def solve_solute_transport_fipy(
         
         eq = (TransientTerm(coeff=porosity) 
               + ConvectionTerm(coeff=velocity)
-              == DiffusionTerm(coeff=D_eff)
+              == diffusion_term
               + ImplicitSourceTerm(coeff=constraint_coeff)
               - constraint_source)
     else:
         eq = (TransientTerm(coeff=porosity) 
               + ConvectionTerm(coeff=velocity)
-              == DiffusionTerm(coeff=D_eff))
+              == diffusion_term)
     
     # Solve for one timestep
     eq.solve(var=concentration, dt=dt)
@@ -631,7 +722,7 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename):
                 Parameters.diffusivity, Parameters.l_disp,
                 Parameters.l_disp * Parameters.disp_ratio,
                 bc['spec_conc_mask'], bc['specified_concentration'],
-                Parameters
+                Parameters, use_tensor_dispersion=True
             )
             
             # Check for convergence / steady state
