@@ -499,12 +499,13 @@ def setup_fipy_initial_conditions(mesh, cell_centers, z_surface, Parameters):
         
         # Seawater where y < interface_elevation and x < some threshold
         seawater_zone = (y < interface_elevation) | (x < 0)
-        concentration[seawater_zone] = Parameters.seawater_concentration
-        concentration[~seawater_zone] = Parameters.freshwater_concentration
+        concentration[seawater_zone] = getattr(Parameters, 'seawater_concentration', 0.035)
+        concentration[~seawater_zone] = getattr(Parameters, 'freshwater_concentration', 0.0)
         
     else:
         # Uniform fresh water
-        concentration = np.full(n_cells, Parameters.freshwater_concentration)
+        freshwater_conc = getattr(Parameters, 'freshwater_concentration', 0.0)
+        concentration = np.full(n_cells, freshwater_conc)
     
     # Initial density
     density = calculate_fluid_density(concentration, Parameters.gamma, Parameters.rho_f_0)
