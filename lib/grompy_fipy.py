@@ -220,6 +220,104 @@ def calculate_dispersion_coefficients_fipy(fipy_mesh, velocity_face, porosity, d
     return dispersion_tensor
 
 
+
+def calculate_boundary_fluxes_fipy(cell_centers, pressure, density, k_tensor, 
+                                   viscosity, g, bc_dict, Parameters, year):
+    """Calculate boundary fluxes matching escript implementation."""
+    x = cell_centers[:, 0]
+    y = cell_centers[:, 1]
+    
+    kxx = k_tensor[0][0]
+    kyy = k_tensor[1][1]
+    k_eff = np.sqrt(kxx * kyy)
+    
+    surface_mask = bc_dict['surface']
+    sea_surface_mask = bc_dict['sea_surface']
+    land_surface_mask = bc_dict['land_surface']
+    
+    n_cells = len(x)
+    qx = np.zeros(n_cells)
+    qy = np.zeros(n_cells)
+    
+    for i in range(n_cells):
+        if surface_mask[i]:
+            rho_local = density[i]
+            qy[i] = -(k_eff / viscosity) * (0.0 - rho_local * g)
+    
+    flux_surface_norm = np.array([qx, qy])
+    
+    submarine_mask = sea_surface_mask & (x < 0)
+    submarine_flux = flux_surface_norm[1] * submarine_mask.astype(float)
+    submarine_flux_in = submarine_flux * (flux_surface_norm[1] < 0)
+    submarine_flux_out = submarine_flux * (flux_surface_norm[1] > 0)
+    
+    total_submarine_flux = np.sum(submarine_flux)
+    total_submarine_flux_in = np.sum(submarine_flux_in)
+    total_submarine_flux_out = np.sum(submarine_flux_out)
+    
+    active_seepage_bnd = bc_dict.get('active_seepage_mask', np.zeros(n_cells))
+    seepage_flux = flux_surface_norm[1] * active_seepage_bnd.astype(float)
+    total_seepage_flux = np.sum(seepage_flux)
+    
+    land_mask = land_surface_mask & (x >= 0)
+    land_flux = flux_surface_norm[1] * land_mask.astype(float)
+    land_flux_in = land_flux * (flux_surface_norm[1] < 0)
+    land_flux_out = land_flux * (flux_surface_norm[1] > 0)
+    
+    total_land_flux_in = np.sum(land_flux_in)
+    total_land_flux_out = np.sum(land_flux_out)
+    
+    recharge_mask = bc_dict.get('recharge_mask', np.zeros(n_cells))
+    recharge_flux = flux_surface_norm[1] * recharge_mask.astype(float)
+    total_rch_flux = np.sum(recharge_flux)
+    
+    total_flux_over_surface_norm = np.array([0.0, total_land_flux_in + total_land_flux_out + total_submarine_flux])
+    
+    land_flux_vals = flux_surface_norm[1][land_mask]
+    seepage_flux_vals = flux_surface_norm[1][active_seepage_bnd > 0]
+    submarine_flux_vals = flux_surface_norm[1][submarine_mask]
+    
+    min_land_flux = np.min(land_flux_vals) if len(land_flux_vals) > 0 else 0.0
+    max_land_flux = np.max(land_flux_vals) if len(land_flux_vals) > 0 else 0.0
+    min_seepage_flux = np.min(seepage_flux_vals) if len(seepage_flux_vals) > 0 else 0.0
+    max_seepage_flux = np.max(seepage_flux_vals) if len(seepage_flux_vals) > 0 else 0.0
+    min_submarine_flux = np.min(submarine_flux_vals) if len(submarine_flux_vals) > 0 else 0.0
+    max_submarine_flux = np.max(submarine_flux_vals) if len(submarine_flux_vals) > 0 else 0.0
+    
+    flux_buffer = 1.0e-1 / year
+    
+    outflow_mask = flux_surface_norm[1] > 0
+    inflow_mask = flux_surface_norm[1] < 0
+    
+    inflow_land = inflow_mask & (x > 0)
+    outflow_land = outflow_mask & (x > 0)
+    inflow_sea = inflow_mask & (x <= 0)
+    outflow_sea = outflow_mask & (x <= 0)
+    
+    ext_inflow_land = np.sum(inflow_land)
+    ext_outflow_land = np.sum(outflow_land)
+    ext_inflow_sea = np.sum(inflow_sea)
+    ext_outflow_sea = np.sum(outflow_sea)
+    
+    outflow_land_threshold = outflow_mask & (x > 0) & (flux_surface_norm[1] > flux_buffer)
+    outflow_sea_threshold = outflow_mask & (x <= 0) & (flux_surface_norm[1] > flux_buffer)
+    
+    ext_outflow_land_threshold = np.sum(outflow_land_threshold)
+    ext_outflow_sea_threshold = np.sum(outflow_sea_threshold)
+    
+    boundary_fluxes = [flux_surface_norm, land_flux, land_flux_out, submarine_flux, submarine_flux_in, submarine_flux_out]
+    
+    boundary_flux_stats = [total_flux_over_surface_norm, total_rch_flux, total_seepage_flux,
+                           total_land_flux_in, total_land_flux_out, total_submarine_flux,
+                           total_submarine_flux_in, total_submarine_flux_out,
+                           0, 0, 0, 0,
+                           ext_inflow_land, ext_outflow_land, ext_inflow_sea, ext_outflow_sea,
+                           ext_outflow_land_threshold, ext_outflow_sea_threshold,
+                           min_land_flux, max_land_flux, min_seepage_flux, max_seepage_flux,
+                           min_submarine_flux, max_submarine_flux]
+    
+    return boundary_fluxes, boundary_flux_stats
+
 def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
     """
     Set up boundary conditions for the FiPy model.
@@ -677,6 +775,17 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename):
     
     timestep = 0
     output_step = 0
+    # Initialize tracking arrays for metrics
+    pressure_prev = pressure.copy()
+    concentration_prev = concentration.copy()
+    dts = []
+    runtimes = []
+    pressure_differences_max = []
+    pressure_differences_mean = []
+    concentration_differences_max = []
+    concentration_differences_mean = []
+    reached_steady_state = False
+    
     last_output_time = 0
     
     # Main time loop
@@ -731,11 +840,28 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename):
         else:
             conc_change = 0
         
+        # Track differences
+        pressure_diff = np.abs(pressure - pressure_prev)
+        concentration_diff = np.abs(concentration - concentration_prev)
+        
+        pressure_differences_max.append(np.max(pressure_diff) if len(pressure_diff) > 0 else 0.0)
+        pressure_differences_mean.append(np.mean(pressure_diff) if len(pressure_diff) > 0 else 0.0)
+        concentration_differences_max.append(np.max(concentration_diff) if len(concentration_diff) > 0 else 0.0)
+        concentration_differences_mean.append(np.mean(concentration_diff) if len(concentration_diff) > 0 else 0.0)
+        
+        pressure_prev = pressure.copy()
+        concentration_prev = concentration.copy()
+        
         # Update time
         runtime += dt
         timestep += 1
         
         # Increase timestep
+        
+        # Track timestep and runtime
+        dts.append(dt)
+        runtimes.append(runtime)
+        
         dt = min(dt * Parameters.dt_inc, Parameters.dt_max)
         
         # Output
@@ -781,21 +907,76 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename):
             if conc_rate < Parameters.max_concentration_change_steady_state:
                 print(f"Steady state reached at t = {get_timestr(runtime)}")
                 print(f"Concentration change rate: {conc_rate:.2e} kg/kg/yr")
+                reached_steady_state = True
                 break
     
     print("-" * 60)
     print(f"Simulation complete: {timestep} timesteps, runtime = {get_timestr(runtime)}")
     
     # Final output
-    results = {
-        'pressure': pressure,
-        'concentration': concentration,
-        'density': density,
-        'runtime': runtime,
-        'timesteps': timestep,
-        'cell_centers': cell_centers,
-        'mesh': mesh,
-    }
+    # Compute final derived fields
+    z_surface = bc['z_surface']
+    h = (pressure / (density * Parameters.g)) + z_surface
+    
+    q_face = calculate_darcy_velocity_fipy(fipy_mesh, pressure, density, k_tensor, 
+                                            Parameters.viscosity, Parameters.g)
+    
+    # Interpolate velocity from faces to cell centers
+    # FiPy FaceVariable -> CellVariable conversion
+    if hasattr(q_face, 'cellCenters'):
+         # Get the cell-centered values from face values
+         q_cell = np.array([q_face[0].cellCenters, q_face[1].cellCenters])
+    else:
+         # Fallback: use arithmetic average of neighboring faces
+         q_vals = np.zeros((2, n_cells))
+         for i in range(2):  # x and y components
+             face_vals = q_face[i].value
+             for cell_idx in range(n_cells):
+                 # Get faces connected to this cell and average
+                 cell_faces = fipy_mesh.cellFaceIDs[:, cell_idx]
+                 q_vals[i, cell_idx] = np.mean(face_vals[cell_faces])
+         q_cell = q_vals
+    
+    q = q_cell
+    
+    q_abs = np.sqrt(q[0]**2 + q[1]**2)
+    nodal_flux = q[1] * bc['surface'].astype(float)
+    
+    Pdiff = np.array(pressure_differences_max[-1] if pressure_differences_max else 0.0)
+    Cdiff = np.array(concentration_differences_max[-1] if concentration_differences_max else 0.0)
+    
+    dts = np.array(dts)
+    runtimes = np.array(runtimes)
+    pressure_differences_max = np.array(pressure_differences_max)
+    concentration_differences_max = np.array(concentration_differences_max)
+    pressure_differences_mean = np.array(pressure_differences_mean)
+    concentration_differences_mean = np.array(concentration_differences_mean)
+    
+    boundary_fluxes, boundary_flux_stats = calculate_boundary_fluxes_fipy(
+        cell_centers, pressure, density, k_tensor, 
+        Parameters.viscosity, Parameters.g, bc, Parameters, year
+    )
+    
+    boundary_conditions = [
+        bc.get('spec_pressure_mask', np.zeros(n_cells)),
+        bc.get('specified_pressure', np.zeros(n_cells)),
+        bc.get('spec_conc_mask', np.zeros(n_cells)),
+        bc.get('active_seepage_mask', np.zeros(n_cells)),
+        bc.get('specified_concentration', np.zeros(n_cells)),
+        bc.get('specified_concentration_rho_f', Parameters.rho_f_0),
+        bc.get('recharge_mask', np.zeros(n_cells)),
+        bc.get('active_seepage_mask', np.zeros(n_cells))
+    ]
+    
+    results = (mesh, bc['surface'], bc.get('sea_surface', None), 
+               k_tensor, pressure, concentration,
+               Parameters.rho_f_0, Parameters.viscosity, h, q, q_abs, nodal_flux,
+               Pdiff, Cdiff,
+               pressure_differences_max, concentration_differences_max,
+               pressure_differences_mean, concentration_differences_mean,
+               dts, runtimes, timestep, output_step,
+               boundary_conditions, boundary_fluxes, boundary_flux_stats,
+               reached_steady_state)
     
     return results
 

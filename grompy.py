@@ -256,36 +256,9 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     
     # run a single model scenario
     if backend_name == 'fipy':
-        # Use FiPy backend
-        print(f"Running model with FiPy backend")
-        
-        # Create mesh first using the mesh function
-        print('Creating mesh...')
-        mesh, surface, sea_surface, seawater, z_surface = mesh_function(Parameters, mesh_fn)
-        print(f'Mesh created: {mesh.numberOfCells} cells')
-        
+        # Use FiPy backend (now returns compatible tuple)
         model_results = grompy_fipy.run_coupled_flow_model_fipy(
             Parameters, ModelOptions, mesh_fn)
-        
-        # Convert FiPy results to a compatible format for downstream processing
-        # Note: FiPy returns a simplified result dict, so we need to handle this
-        end_time = datetime.datetime.now()
-        runtime = end_time - start_time
-        df.loc[run, 'computing_runtime_sec'] = runtime.total_seconds()
-        
-        # Store basic results
-        df.loc[run, 'final_runtime_sec'] = model_results['runtime']
-        df.loc[run, 'final_timesteps'] = model_results['timesteps']
-        df.loc[run, 'pressure_min'] = model_results['pressure'].min()
-        df.loc[run, 'pressure_max'] = model_results['pressure'].max()
-        df.loc[run, 'concentration_min'] = model_results['concentration'].min()
-        df.loc[run, 'concentration_max'] = model_results['concentration'].max()
-        
-        print(f"FiPy model run complete")
-        print(f"Runtime: {model_results['runtime'] / (365.25 * 24 * 60 * 60):.2f} years")
-        print(f"Timesteps: {model_results['timesteps']}")
-        
-        return df
     else:
         # Use escript backend (original implementation)
         model_results = grompy_salt_lib.run_model_scenario(
