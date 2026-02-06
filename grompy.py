@@ -408,39 +408,108 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
                               '%s_final_output.vtu' % model_file_adj)
         print('saving vtk file of model results: %s' % fn_VTK)
 
-        nodata = -99999
-        flux_surface_plot = nodal_flux * surface + \
-            nodata * es.whereZero(surface)
-        if sea_surface is None:
-            sea_surface_save = surface
+        vtk_written = False
+
+        if ESCRIPT_AVAILABLE:
+            # Use escript backend (original code)
+            try:
+                nodata = -99999
+                flux_surface_plot = nodal_flux * surface + \
+                    nodata * es.whereZero(surface)
+                if sea_surface is None:
+                    sea_surface_save = surface
+                else:
+                    sea_surface_save = sea_surface
+
+                esys.weipa.saveVTK(fn_VTK,
+                                   pressure=P,
+                                   concentration=Conc,
+                                   h=h,
+                                   flux=flux,
+                                   qx=flux[0],
+                                   qy=flux[1],
+                                   kx=k_vector[0],
+                                   ky=k_vector[1],
+                                   nodal_flux=nodal_flux,
+                                   surface=surface,
+                                   sea_surface=sea_surface_save,
+                                   nodal_flux_surface=flux_surface_plot,
+                                   specified_pressure_bnd=specified_pressure_bnd,
+                                   active_seepage_bnd=active_seepage_bnd,
+                                   recharge_bnd=rch_bnd_loc,
+                                   active_concentration_bnd=active_concentration_bnd,
+                                   flux_surface_norm=flux_surface_norm,
+                                   land_flux_in=land_flux_in,
+                                   land_flux_out=land_flux_out,
+                                   submarine_flux=submarine_flux,
+                                   submarine_flux_in=submarine_flux_in,
+                                   submarine_flux_out=submarine_flux_out)
+                vtk_written = True
+            except Exception as e:
+                print(f"Warning: escript VTK output failed: {e}")
+
+        elif FIPY_AVAILABLE and backend_name == 'fipy':
+            # Use FiPy VTK writer (new)
+            try:
+                from lib.vtk_writer_fipy import write_vtk_fipy
+                from lib.vtk_variables_mapper import prepare_vtk_variables, prepare_vtk_metadata
+
+                # Extract mesh and cell centers from model results
+                mesh_vtk = model_results[0]
+                
+                # Get cell centers from mesh if not available
+                if hasattr(mesh_vtk, 'cellCenters'):
+                    cell_centers_vtk = np.column_stack([
+                        mesh_vtk.cellCenters[0],
+                        mesh_vtk.cellCenters[1]
+                    ])
+                else:
+                    # Fallback: create dummy cell centers
+                    n_cells = len(P)
+                    cell_centers_vtk = np.random.rand(n_cells, 2)
+
+                # Prepare variables
+                vtk_vars = prepare_vtk_variables(
+                    model_results=model_results,
+                    model_parameters=Parameters,
+                    mesh=mesh_vtk,
+                    cell_centers=cell_centers_vtk
+                )
+
+                # Prepare metadata
+                vtk_meta = prepare_vtk_metadata(
+                    model_parameters=Parameters,
+                    model_options=ModelOptions,
+                    boundary_flux_stats=model_results[24]
+                )
+
+                # Write VTK file
+                success = write_vtk_fipy(
+                    filename=fn_VTK,
+                    mesh=mesh_vtk,
+                    cell_centers=cell_centers_vtk,
+                    variables=vtk_vars,
+                    metadata=vtk_meta,
+                    compression=True,
+                    precision='float32'
+                )
+
+                if success:
+                    vtk_written = True
+                    print(f"  -> VTK file written successfully ({len(vtk_vars)} variables)")
+                else:
+                    print("Warning: FiPy VTK output failed - check dependencies")
+
+            except ImportError as e:
+                print(f"Warning: VTK writer modules not available: {e}")
+            except Exception as e:
+                print(f"Warning: FiPy VTK output error: {e}")
+
+        if vtk_written:
+            df.loc[run, 'vtk_filename'] = fn_VTK
         else:
-            sea_surface_save = sea_surface
-
-        esys.weipa.saveVTK(fn_VTK,
-                           pressure=P,
-                           concentration=Conc,
-                           h=h,
-                           flux=flux,
-                           qx=flux[0],
-                           qy=flux[1],
-                           kx=k_vector[0],
-                           ky=k_vector[1],
-                           nodal_flux=nodal_flux,
-                           surface=surface,
-                           sea_surface=sea_surface_save,
-                           nodal_flux_surface=flux_surface_plot,
-                           specified_pressure_bnd=specified_pressure_bnd,
-                           active_seepage_bnd=active_seepage_bnd,
-                           recharge_bnd=rch_bnd_loc,
-                           active_concentration_bnd=active_concentration_bnd,
-                           flux_surface_norm=flux_surface_norm,
-                           land_flux_in=land_flux_in,
-                           land_flux_out=land_flux_out,
-                           submarine_flux=submarine_flux,
-                           submarine_flux_in=submarine_flux_in,
-                           submarine_flux_out=submarine_flux_out)
-
-        df.loc[run, 'vtk_filename'] = fn_VTK
+            print("  -> Skipping VTK output")
+            df.loc[run, 'vtk_filename'] = None
 
     if ModelOptions.save_variables_to_csv is True:
 

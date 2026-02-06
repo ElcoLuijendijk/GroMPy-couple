@@ -97,6 +97,104 @@ Key parameters are defined in `model_input/model_parameters.py`:
 - `recharge_flux` - Recharge rate (m/s)
 - `seawater_concentration` - Seawater salinity (kg/kg)
 
+## VTK Output Visualization
+
+Both escript and FiPy backends support VTK output for visualization in ParaView and other VTK-compatible tools.
+
+### Requirements
+
+**For escript backend:** Automatic via `esys.weipa` module
+
+**For FiPy backend:** Install optional dependencies (recommended):
+```bash
+pip install vtkmodules    # Native VTK Python bindings (recommended)
+pip install meshio        # Fallback VTK writer (fallback)
+```
+
+### Output Files
+
+- **Location:** `model_output/vtk_files/`
+- **Format:** `.vtu` (XML unstructured grid with compression)
+- **Precision:** float32 (50% smaller files than float64)
+- **Variables:** 18 cell-centered fields including:
+  - Pressure, concentration, hydraulic head
+  - Velocity components (x, y) and magnitude
+  - Permeability (diagonal components)
+  - Boundary condition masks and nodal flux
+- **Metadata:** Embedded model parameters and boundary conditions (accessible in ParaView Object Inspector)
+
+### Opening VTK Files
+
+**ParaView (recommended, free and open-source):**
+```bash
+# Install ParaView if needed
+# https://www.paraview.org/download/
+
+paraview model_output/vtk_files/*.vtu
+```
+
+**Other options:**
+- VisIt (https://visit.llnl.gov/)
+- Gmsh (https://gmsh.info/)
+- ICEM CFD, Salome, or other VTK-compatible viewers
+
+### Variable Descriptions
+
+| Variable | Units | Description |
+|----------|-------|-------------|
+| pressure | Pa | Fluid pressure |
+| concentration | ppt | Solute concentration |
+| hydraulic_head | m | Hydraulic head |
+| velocity_x, velocity_y | m/s | Darcy velocity components |
+| flux_magnitude | m/s | Magnitude of Darcy velocity |
+| permeability_xx, permeability_yy | m² | Diagonal permeability tensor components |
+| nodal_flux | m³/s | Surface nodal flux (non-zero on surface) |
+| surface_mask, sea_surface_mask | 0/1 | Boolean masks for surface identification |
+| specified_pressure_bnd | 0/1 | Specified pressure boundary mask |
+| active_seepage_bnd | 0/1 | Active seepage boundary mask |
+| recharge_bnd | 0/1 | Recharge boundary mask |
+| active_concentration_bnd | 0/1 | Active concentration boundary mask |
+
+### Metadata Attributes
+
+The following metadata is embedded in each VTK file and visible in ParaView's Object Inspector:
+
+**Model Parameters:**
+- porosity, diffusivity, permeability (isotropic estimate)
+- dispersivity_longitudinal, dispersivity_transverse
+- viscosity, fluid_density_initial, gravity
+
+**Boundary Conditions:**
+- left_pressure_head, right_pressure_head
+- initial_salinity, seepage_active
+- recharge_flux
+
+**Flux Statistics:**
+- flux_total_seepage_flux, flux_total_submarine_flux_out
+- flux_total_land_flux_in, flux_total_land_flux_out
+- flux_total_submarine_flux_in
+
+**Simulation Info:**
+- backend ("fipy" or "escript")
+- vtk_format_version, num_timesteps
+
+### Troubleshooting VTK Output
+
+**Problem:** "No VTK writer available"
+- **Solution:** Install pyVTK: `pip install vtkmodules`
+- **Fallback:** Also install meshio: `pip install meshio`
+- VTK output will be skipped if no writer is available (model continues normally)
+
+**Problem:** VTK file is too large
+- **Solution:** Model uses float32 precision and compression by default
+- For 50x100 cell mesh: typically 1-2 MB compressed vs 4-5 MB uncompressed
+- Consider reducing mesh resolution for large models
+
+**Problem:** File doesn't open in ParaView
+- **Solution:** Ensure file was written successfully (check console output)
+- Try with different ParaView version
+- Verify vtkmodules installation: `python -c "import vtkmodules.all as vtk; print('OK')"`
+
 ## Backend Comparison
 
 | Feature | esys-escript | FiPy |
