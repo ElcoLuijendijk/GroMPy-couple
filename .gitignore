@@ -1,4 +1,11 @@
 *.msh
 *.pyc
 *.pyo
-
+.DS_Store
+.fuse_*
+*.bak
+*.ipynb
+nohup.out
+.opencode/
+model_output/
+__pycache__/
