@@ -342,11 +342,22 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
     y = cell_centers[:, 1]
     n_cells = len(x)
     
+    # Helper function to get parameter with default
+    def get_param(name, default=None):
+        return getattr(Parameters, name, default)
+    
     # Calculate z_surface (topographic surface)
-    z_surface = x * Parameters.topo_gradient
+    z_surface = x * get_param('topo_gradient', 0.0)
     
     # Tolerance for boundary detection
-    tol = Parameters.cellsize * 0.5
+    cellsize = get_param('cellsize', None)
+    if cellsize is None:
+        # Calculate approximate cellsize from mesh
+        x_range = x.max() - x.min()
+        y_range = y.max() - y.min()
+        estimated_area = (x_range * y_range) / len(x)
+        cellsize = np.sqrt(estimated_area)
+    tol = cellsize * 0.5
     
     # Surface mask: cells at the top boundary
     y_max = y.max()
@@ -359,16 +370,25 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
     land_surface_mask = surface_mask & (x >= 0)
     
     # Specified pressure boundary
+    spec_pressure_xmin = get_param('specified_pressure_xmin', [-10000])
+    spec_pressure_xmax = get_param('specified_pressure_xmax', [0.01])
+    
+    # Handle both list and scalar values
+    if isinstance(spec_pressure_xmin, (list, tuple)):
+        spec_pressure_xmin = spec_pressure_xmin[0] if spec_pressure_xmin else -10000
+    if isinstance(spec_pressure_xmax, (list, tuple)):
+        spec_pressure_xmax = spec_pressure_xmax[0] if spec_pressure_xmax else 0.01
+    
     spec_pressure_mask = (
-        (x >= Parameters.specified_pressure_xmin) &
-        (x <= Parameters.specified_pressure_xmax) &
+        (x >= spec_pressure_xmin) &
+        (x <= spec_pressure_xmax) &
         surface_mask
     )
     
     # Calculate specified pressure values
-    # For seawater, add hydrostatic pressure from water column
+     # For seawater, add hydrostatic pressure from water column
     specified_pressure = np.zeros(n_cells)
-    if Parameters.add_seawater_pressure:
+    if getattr(Parameters, 'add_seawater_pressure', False):
         # Hydrostatic pressure from seawater column
         depth_below_sealevel = np.maximum(0, Parameters.sea_water_level - y)
         rho_seawater = calculate_fluid_density(
@@ -379,28 +399,35 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
         specified_pressure = spec_pressure_mask * depth_below_sealevel * rho_seawater * Parameters.g
     
     # Recharge boundary: land surface cells
+    recharge_xmin = get_param('recharge_mass_flux_xmin', 1e-6)
+    recharge_xmax = get_param('recharge_mass_flux_xmax', 1e6)
     recharge_mask = (
-        (x >= Parameters.recharge_mass_flux_xmin) &
-        (x <= Parameters.recharge_mass_flux_xmax) &
+        (x >= recharge_xmin) &
+        (x <= recharge_xmax) &
         land_surface_mask
     )
     
     # Drain/seepage boundary
+    drain_xmin = get_param('drain_bnd_xmin', -0.001)
+    drain_xmax = get_param('drain_bnd_xmax', 1e6)
     drain_mask = (
-        (x >= Parameters.drain_bnd_xmin) &
-        (x <= Parameters.drain_bnd_xmax) &
+        (x >= drain_xmin) &
+        (x <= drain_xmax) &
         surface_mask
     )
     
     # Specified concentration boundary
+    spec_conc_xmin = get_param('specified_concentration_xmin', -0.01)
+    spec_conc_xmax = get_param('specified_concentration_xmax', 1e6)
     spec_conc_mask = (
-        (x >= Parameters.specified_concentration_xmin) &
-        (x <= Parameters.specified_concentration_xmax) &
+        (x >= spec_conc_xmin) &
+        (x <= spec_conc_xmax) &
         sea_surface_mask
     )
     
     specified_concentration = np.zeros(n_cells)
-    specified_concentration[spec_conc_mask] = Parameters.seawater_concentration
+    seawater_conc = get_param('seawater_concentration', 0.035)
+    specified_concentration[spec_conc_mask] = seawater_conc
     
     return {
         'surface': surface_mask,
