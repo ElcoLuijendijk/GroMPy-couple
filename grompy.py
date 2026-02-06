@@ -28,6 +28,7 @@ import pdb
 import sys
 import itertools
 import os
+import glob
 import inspect
 import datetime
 import random
@@ -209,9 +210,19 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
         print(f"creating new directory for {model_output_folder} for model output")
         os.makedirs(model_output_folder)
 
-    # set filename for mesh (use model_output_folder to keep mesh with outputs)
-    mesh_fn = os.path.join(model_output_folder,
-                           '_%i_%s.msh' % (random.randint(0, 100), scenario_name))
+     # set filename for mesh (use model_output_folder to keep mesh with outputs)
+    # Generate a unique mesh filename, but check if an existing one can be reused
+    mesh_pattern = os.path.join(model_output_folder, '*_%s.msh' % scenario_name)
+    existing_meshes = glob.glob(mesh_pattern)
+    
+    if existing_meshes:
+        # Reuse the most recently modified mesh with matching scenario name
+        mesh_fn = max(existing_meshes, key=os.path.getmtime)
+        print(f"Using existing mesh: {mesh_fn}")
+    else:
+        # Generate new unique mesh filename
+        mesh_fn = os.path.join(model_output_folder,
+                               '_%i_%s.msh' % (random.randint(0, 100), scenario_name))
 
     # get names and values of input parameters
     attributes = inspect.getmembers(
@@ -256,6 +267,11 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     
     # run a single model scenario
     if backend_name == 'fipy':
+        # For FiPy backend, create mesh first using the mesh_function
+        print("Creating mesh with FiPy backend")
+        mesh_functions = get_mesh_functions('fipy')
+        mesh, surface, sea_surface, seawater, z_surface = mesh_function(Parameters, mesh_fn)
+        
         # Use FiPy backend (now returns compatible tuple)
         model_results = grompy_fipy.run_coupled_flow_model_fipy(
             Parameters, ModelOptions, mesh_fn)
