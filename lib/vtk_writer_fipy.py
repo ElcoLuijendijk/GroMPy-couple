@@ -34,6 +34,30 @@ import logging
 # Set up logging
 logger = logging.getLogger(__name__)
 
+# Configure logging to show warnings in console
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
+
+
+def _make_error_result(error_msg, stage):
+    """Helper to create error result dict."""
+    return {
+        'success': False,
+        'error': error_msg,
+        'stage': stage,
+        'variables_written': 0
+    }
+
+
+def _make_success_result(num_variables):
+    """Helper to create success result dict."""
+    return {
+        'success': True,
+        'error': None,
+        'stage': 'complete',
+        'variables_written': num_variables
+    }
+
+
 
 def check_vtk_available():
     """
@@ -95,9 +119,14 @@ def write_vtk_fipy(
     
     Returns
     -------
-    bool
-        True if VTK file written successfully, False otherwise.
-        Never raises exception - logs warnings instead.
+    dict
+        Dictionary with keys:
+        - 'success' (bool): True if VTK file written successfully
+        - 'error' (str or None): Error message if failed, None if succeeded
+        - 'stage' (str or None): Stage where failure occurred
+        - 'variables_written' (int): Number of variables successfully written
+        
+        Never raises exception - logs warnings and returns error dict instead.
     
     Notes
     -----
@@ -108,7 +137,7 @@ def write_vtk_fipy(
     
     Examples
     --------
-    >>> success = write_vtk_fipy(
+    >>> result = write_vtk_fipy(
     ...     'model_output.vtu',
     ...     mesh=fipy_mesh,
     ...     cell_centers=cc,
@@ -116,16 +145,16 @@ def write_vtk_fipy(
     ...     metadata={'porosity': 0.2},
     ...     compression=True
     ... )
-    >>> if success:
-    ...     print("VTK file written successfully")
+    >>> if result['success']:
+    ...     print(f"VTK file written with {result['variables_written']} variables")
     >>> else:
-    ...     print("Warning: VTK output failed")
+    ...     print(f"VTK output failed at {result['stage']}: {result['error']}")
     """
     
     try:
         # Validate inputs
         if not _validate_inputs(mesh, cell_centers, variables):
-            return False
+            return _make_error_result("Input validation failed", "validation")
         
         # Determine data precision
         if precision == 'float32':
@@ -137,7 +166,7 @@ def write_vtk_fipy(
         points, cells = _extract_mesh_geometry(mesh)
         if points is None:
             logger.warning("Could not extract mesh geometry")
-            return False
+            return _make_error_result("Could not extract mesh geometry", "mesh_extraction")
         
         # Prepare cell data with precision conversion
         cell_data = {}
@@ -151,7 +180,7 @@ def write_vtk_fipy(
         
         if not cell_data:
             logger.warning("No valid cell data to write")
-            return False
+            return _make_error_result("No valid cell data to write", "variable_conversion")
         
         # Get available VTK writer
         vtk_writer = check_vtk_available()
@@ -164,7 +193,7 @@ def write_vtk_fipy(
                     metadata=metadata, compression=True, precision=dtype
                 )
                 if success:
-                    return True
+                    return _make_success_result(len(cell_data))
                 logger.warning("pyVTK with compression failed, trying without")
             
             # Try pyVTK without compression
@@ -173,7 +202,7 @@ def write_vtk_fipy(
                 metadata=metadata, compression=False, precision=dtype
             )
             if success:
-                return True
+                return _make_success_result(len(cell_data))
             logger.warning("pyVTK writer failed, trying meshio fallback")
         
         if vtk_writer == 'meshio' or vtk_writer == 'pyVTK':
@@ -183,15 +212,15 @@ def write_vtk_fipy(
                 metadata=metadata, precision=dtype
             )
             if success:
-                return True
+                return _make_success_result(len(cell_data))
             logger.warning("meshio writer failed")
         
         logger.warning("No VTK writer available (install vtkmodules or meshio)")
-        return False
+        return _make_error_result("No VTK writer available", "writer")
     
     except Exception as e:
         logger.warning(f"VTK writing failed: {e}")
-        return False
+        return _make_error_result(str(e), "exception")
 
 
 def _validate_inputs(mesh, cell_centers, variables):
@@ -247,14 +276,39 @@ def _validate_inputs(mesh, cell_centers, variables):
         return False
 
 
+def _unwrap_mesh(mesh):
+    """
+    Unwrap mesh from FiPyMesh wrapper if needed.
+    
+    Handles both raw FiPy mesh objects and FiPyMesh wrapper instances
+    from the backend module. Returns the underlying FiPy mesh object.
+    
+    Parameters
+    ----------
+    mesh : FiPy mesh or FiPyMesh wrapper
+        The mesh object to unwrap
+    
+    Returns
+    -------
+    mesh : FiPy mesh object
+        The underlying FiPy mesh
+    """
+    # Check if this is a FiPyMesh wrapper (has fipy_mesh property)
+    if hasattr(mesh, 'fipy_mesh'):
+        return mesh.fipy_mesh
+    # Otherwise, assume it's already a raw FiPy mesh
+    return mesh
+
+
 def _extract_mesh_geometry(mesh):
     """
     Extract vertex coordinates and cell connectivity from FiPy mesh.
     
     Parameters
     ----------
-    mesh : FiPy mesh object
-        Supports Tri2D, Gmsh2D, and similar mesh types
+    mesh : FiPy mesh object or FiPyMesh wrapper
+        Supports Tri2D, Gmsh2D, Grid2D, and similar mesh types.
+        Can be either a raw FiPy mesh or a FiPyMesh wrapper instance.
     
     Returns
     -------
@@ -266,10 +320,13 @@ def _extract_mesh_geometry(mesh):
     Returns (None, None) if extraction fails.
     """
     try:
+        # Unwrap mesh if it's a FiPyMesh wrapper
+        actual_mesh = _unwrap_mesh(mesh)
+        
         # Try to get vertex coordinates
-        if hasattr(mesh, 'vertexCoords'):
+        if hasattr(actual_mesh, 'vertexCoords'):
             # FiPy format: (2, n_vertices) or (n_vertices, 2)
-            verts = mesh.vertexCoords
+            verts = actual_mesh.vertexCoords
             if verts.shape[0] == 2:
                 verts = verts.T  # Transpose to (n_vertices, 2)
         else:
@@ -283,8 +340,8 @@ def _extract_mesh_geometry(mesh):
             points = verts
         
         # Get cell connectivity
-        if hasattr(mesh, '_cellVertexIDs'):
-            cells = mesh._cellVertexIDs
+        if hasattr(actual_mesh, '_cellVertexIDs'):
+            cells = actual_mesh._cellVertexIDs
             # FiPy format: (n_vertices_per_cell, n_cells)
             if cells.shape[0] < cells.shape[1]:
                 cells = cells.T  # Transpose to (n_cells, n_vertices_per_cell)
