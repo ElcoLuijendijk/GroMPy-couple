@@ -160,14 +160,14 @@ class ModelParameters(dict):
     cellsize_y = 5.0  # (m)
 
     # length of landward side of model domain
-    L = 1500.0  # (m)
+    L = 8045  # (m)
 
     ## coastal mesh params:
     # topographic gradient
-    topo_gradient = 0.05  # (m/m)
+    topo_gradient = 0.0130  # (m/m)
 
     # length of seaward side of model domain
-    L_sea = 500.0  # (m)
+    L_sea = 1000.0  # (m)
 
     # distance on either side of coastline with smaller cell size
     buffer_distance_sea = 500.0  # (m)
@@ -186,7 +186,7 @@ class ModelParameters(dict):
     #####################
     # groundwater mass flux (density x flux) over top boundary
     # median recharge coastal watersheds = 0.145 / year using de Graaf et al. 2015 dataset
-    recharge_flux = 0.25 / year
+    recharge_flux = 0.145 / year
 
     # density of recharge fluid
     recharge_density = 998.7  # (kg / m^3)
