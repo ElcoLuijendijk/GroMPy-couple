@@ -94,6 +94,7 @@ except ImportError:
 
 # local libraries
 import lib.grompy_lib as grompy_salt_lib
+from lib import array_ops
 
 # Mesh functions will be imported conditionally based on backend
 # See get_mesh_functions() below
@@ -377,35 +378,35 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     df.loc[run, 'model_scenario_id'] = run_id
     if model_scenario_name is not None:
         df.loc[run, 'model_scenario_name'] = model_scenario_name
-    df.loc[run, 'P_min'] = es.inf(P)
-    df.loc[run, 'P_max'] = es.sup(P)
-    df.loc[run, 'C_min'] = es.inf(Conc)
-    df.loc[run, 'C_max'] = es.sup(Conc)
-    df.loc[run, 'h_min'] = es.inf(h)
-    df.loc[run, 'h_max'] = es.sup(h)
-    df.loc[run, 'vx_min'] = es.inf(flux[0])
-    df.loc[run, 'vx_max'] = es.sup(flux[0])
-    df.loc[run, 'vy_min'] = es.inf(flux[1])
-    df.loc[run, 'vy_max'] = es.sup(flux[1])
-    df.loc[run, 'max_pressure_change'] = es.Lsup(Pdiff)
-    df.loc[run, 'max_concentration_change'] = es.Lsup(Cdiff)
+    df.loc[run, 'P_min'] = array_ops.min_value(P)
+    df.loc[run, 'P_max'] = array_ops.max_value(P)
+    df.loc[run, 'C_min'] = array_ops.min_value(Conc)
+    df.loc[run, 'C_max'] = array_ops.max_value(Conc)
+    df.loc[run, 'h_min'] = array_ops.min_value(h)
+    df.loc[run, 'h_max'] = array_ops.max_value(h)
+    df.loc[run, 'vx_min'] = array_ops.min_value(flux[0])
+    df.loc[run, 'vx_max'] = array_ops.max_value(flux[0])
+    df.loc[run, 'vy_min'] = array_ops.min_value(flux[1])
+    df.loc[run, 'vy_max'] = array_ops.max_value(flux[1])
+    df.loc[run, 'max_pressure_change'] = array_ops.max_absolute_value(Pdiff)
+    df.loc[run, 'max_concentration_change'] = array_ops.max_absolute_value(Cdiff)
     df.loc[run, 'runtime'] = runtime
     df.loc[run, 'nsteps'] = nsteps
     df.loc[run, 'dt_final'] = dt
-    df.loc[run, 'total_flux_over_surface'] = total_flux_over_surface_norm[1]
-    df.loc[run, 'total_rch_flux'] = total_rch_flux[1]
-    df.loc[run, 'total_seepage_flux'] = total_seepage_flux[1]
-    df.loc[run, 'total_land_flux_in'] = total_land_flux_in[1]
-    df.loc[run, 'total_land_flux_out'] = total_land_flux_out[1]
-    df.loc[run, 'total_submarine_flux'] = total_submarine_flux[1]
-    df.loc[run, 'total_submarine_flux_in'] = total_submarine_flux_in[1]
-    df.loc[run, 'total_submarine_flux_out'] = total_submarine_flux_out[1]
-    df.loc[run, 'ext_inflow_land'] = ext_inflow_land[1]
-    df.loc[run, 'ext_outflow_land'] = ext_outflow_land[1]
-    df.loc[run, 'ext_inflow_sea'] = ext_inflow_sea[1]
-    df.loc[run, 'ext_outflow_sea'] = ext_outflow_sea[1]
-    df.loc[run, 'ext_outflow_land_exc_threshold'] = ext_outflow_land_threshold[1]
-    df.loc[run, 'ext_outflow_sea_exc_threshold'] = ext_outflow_sea_threshold[1]
+    df.loc[run, 'total_flux_over_surface'] = array_ops.extract_flux_component(total_flux_over_surface_norm)
+    df.loc[run, 'total_rch_flux'] = array_ops.extract_flux_component(total_rch_flux)
+    df.loc[run, 'total_seepage_flux'] = array_ops.extract_flux_component(total_seepage_flux)
+    df.loc[run, 'total_land_flux_in'] = array_ops.extract_flux_component(total_land_flux_in)
+    df.loc[run, 'total_land_flux_out'] = array_ops.extract_flux_component(total_land_flux_out)
+    df.loc[run, 'total_submarine_flux'] = array_ops.extract_flux_component(total_submarine_flux)
+    df.loc[run, 'total_submarine_flux_in'] = array_ops.extract_flux_component(total_submarine_flux_in)
+    df.loc[run, 'total_submarine_flux_out'] = array_ops.extract_flux_component(total_submarine_flux_out)
+    df.loc[run, 'ext_inflow_land'] = array_ops.extract_flux_component(ext_inflow_land)
+    df.loc[run, 'ext_outflow_land'] = array_ops.extract_flux_component(ext_outflow_land)
+    df.loc[run, 'ext_inflow_sea'] = array_ops.extract_flux_component(ext_inflow_sea)
+    df.loc[run, 'ext_outflow_sea'] = array_ops.extract_flux_component(ext_outflow_sea)
+    df.loc[run, 'ext_outflow_land_exc_threshold'] = array_ops.extract_flux_component(ext_outflow_land_threshold)
+    df.loc[run, 'ext_outflow_sea_exc_threshold'] = array_ops.extract_flux_component(ext_outflow_sea_threshold)
     df.loc[run, 'min_land_flux'] = min_land_flux
     df.loc[run, 'max_land_flux'] = max_land_flux
     df.loc[run, 'min_seepage_flux'] = min_seepage_flux
@@ -500,7 +501,7 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
                 )
 
                 # Write VTK file
-                success = write_vtk_fipy(
+                result = write_vtk_fipy(
                     filename=fn_VTK,
                     mesh=mesh_vtk,
                     cell_centers=cell_centers_vtk,
@@ -510,11 +511,26 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
                     precision='float32'
                 )
 
+                # Handle result (now dict, not bool)
+                if isinstance(result, dict):
+                    success = result.get('success', False)
+                    error = result.get('error', None)
+                    stage = result.get('stage', None)
+                    num_vars = result.get('variables_written', 0)
+                else:
+                    # Backward compatibility: old bool return
+                    success = result
+                    error = None
+                    stage = None
+                    num_vars = len(vtk_vars) if result else 0
+
                 if success:
                     vtk_written = True
-                    print(f"  -> VTK file written successfully ({len(vtk_vars)} variables)")
+                    print(f"  -> VTK file written successfully ({num_vars} variables)")
                 else:
-                    print("Warning: FiPy VTK output failed - check dependencies")
+                    error_msg = error if error else "Unknown error"
+                    stage_msg = f" at {stage}" if stage else ""
+                    print(f"Warning: FiPy VTK output failed{stage_msg}: {error_msg}")
 
             except ImportError as e:
                 print(f"Warning: VTK writer modules not available: {e}")
