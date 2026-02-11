@@ -4,7 +4,6 @@
 .DS_Store
 .fuse_*
 *.bak
-*.ipynb
 nohup.out
 .opencode/
 model_output/
