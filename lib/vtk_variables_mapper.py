@@ -41,12 +41,13 @@ def prepare_vtk_variables(
     model_parameters,
     mesh,
     cell_centers,
-    boundary_info=None
+    boundary_info=None,
+    boundary_fluxes=None
 ):
     """
     Extract and prepare VTK variables from FiPy model output tuple.
     
-    Maps the 25-element FiPy output tuple to 18 cell-centered variables
+    Maps the 25-element FiPy output tuple to 18+ cell-centered variables
     plus metadata, matching the format of esys.weipa.saveVTK output.
     
     Parameters
@@ -76,7 +77,7 @@ def prepare_vtk_variables(
         [20] nsteps
         [21] output_step
         [22] boundary_conditions (8-element list)
-        [23] boundary_fluxes
+        [23] boundary_fluxes (6-element list with flux arrays)
         [24] boundary_flux_stats (dict)
         [25] reached_steady_state
     
@@ -92,23 +93,35 @@ def prepare_vtk_variables(
     boundary_info : dict, optional
         Additional boundary information
     
+    boundary_fluxes : tuple, optional
+        6-element tuple from grompy_fipy.calculate_boundary_fluxes_fipy():
+        [0] flux_surface_norm (2xN array: [qx, qy])
+        [1] land_flux
+        [2] land_flux_out
+        [3] submarine_flux
+        [4] submarine_flux_in
+        [5] submarine_flux_out
+        If provided, these will be added as cell-centered VTK variables.
+    
     Returns
     -------
     dict
-        Dictionary with 18 variables suitable for VTK:
-        - pressure, concentration, hydraulic_head
-        - velocity_x, velocity_y, flux_magnitude
-        - permeability_xx, permeability_yy
-        - nodal_flux
-        - surface_mask, sea_surface_mask
-        - specified_pressure_bnd, active_seepage_bnd, recharge_bnd
-        - active_concentration_bnd
+        Dictionary with 18-26 variables suitable for VTK:
+        Core (8): pressure, concentration, hydraulic_head, velocity_x, velocity_y, 
+                  flux_magnitude, permeability_xx, permeability_yy
+        Boundary (7): nodal_flux, surface_mask, sea_surface_mask, 
+                      specified_pressure_bnd, active_seepage_bnd, recharge_bnd,
+                      active_concentration_bnd
+        Boundary Fluxes (8, if provided): flux_surface_norm_x, flux_surface_norm_y,
+                      land_flux_in, land_flux_out, submarine_flux,
+                      submarine_flux_in, submarine_flux_out
         
         All values converted to float32 for VTK compatibility.
     
     Examples
     --------
-    >>> variables = prepare_vtk_variables(model_results, params, mesh, cc)
+    >>> variables = prepare_vtk_variables(model_results, params, mesh, cc, 
+    ...                                    boundary_fluxes=model_results[23])
     >>> print(f"Extracted {len(variables)} variables")
     """
     
@@ -218,6 +231,40 @@ def prepare_vtk_variables(
             variables['active_concentration_bnd'] = spec_c.astype(np.float32) if isinstance(spec_c, np.ndarray) else np.zeros(n_cells, dtype=np.float32)
         else:
             variables['active_concentration_bnd'] = np.zeros(n_cells, dtype=np.float32)
+        
+        # Boundary flux variables (8 variables, if provided)
+        # -------------------------------------------------
+        if boundary_fluxes is not None and isinstance(boundary_fluxes, (tuple, list)) and len(boundary_fluxes) >= 6:
+            try:
+                flux_surface_norm = boundary_fluxes[0]
+                land_flux_in = boundary_fluxes[1]
+                land_flux_out = boundary_fluxes[2]
+                submarine_flux = boundary_fluxes[3]
+                submarine_flux_in = boundary_fluxes[4]
+                submarine_flux_out = boundary_fluxes[5]
+                
+                # flux_surface_norm is 2xN array [qx, qy] - split into components
+                if isinstance(flux_surface_norm, np.ndarray) and flux_surface_norm.ndim == 2 and flux_surface_norm.shape[0] == 2:
+                    variables['flux_surface_norm_x'] = _to_float32(flux_surface_norm[0])
+                    variables['flux_surface_norm_y'] = _to_float32(flux_surface_norm[1])
+                else:
+                    logger.warning("flux_surface_norm malformed, creating zero arrays")
+                    variables['flux_surface_norm_x'] = np.zeros(n_cells, dtype=np.float32)
+                    variables['flux_surface_norm_y'] = np.zeros(n_cells, dtype=np.float32)
+                
+                # Land flux variables
+                variables['land_flux_in'] = _to_float32(land_flux_in)
+                variables['land_flux_out'] = _to_float32(land_flux_out)
+                
+                # Submarine flux variables
+                variables['submarine_flux'] = _to_float32(submarine_flux)
+                variables['submarine_flux_in'] = _to_float32(submarine_flux_in)
+                variables['submarine_flux_out'] = _to_float32(submarine_flux_out)
+                
+                logger.info("Successfully extracted boundary flux variables (8 variables)")
+            
+            except Exception as e:
+                logger.warning(f"Error extracting boundary fluxes: {e}")
         
         logger.info(f"Successfully extracted {len(variables)} VTK variables")
         return variables

@@ -490,7 +490,8 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
                     model_results=model_results,
                     model_parameters=Parameters,
                     mesh=mesh_vtk,
-                    cell_centers=cell_centers_vtk
+                    cell_centers=cell_centers_vtk,
+                    boundary_fluxes=model_results[23]
                 )
 
                 # Prepare metadata
