@@ -419,6 +419,13 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
     # Specified concentration boundary
     spec_conc_xmin = get_param('specified_concentration_xmin', -0.01)
     spec_conc_xmax = get_param('specified_concentration_xmax', 1e6)
+    
+    # Handle both list and scalar values
+    if isinstance(spec_conc_xmin, (list, tuple)):
+        spec_conc_xmin = spec_conc_xmin[0] if spec_conc_xmin else -0.01
+    if isinstance(spec_conc_xmax, (list, tuple)):
+        spec_conc_xmax = spec_conc_xmax[0] if spec_conc_xmax else 1e6
+    
     spec_conc_mask = (
         (x >= spec_conc_xmin) &
         (x <= spec_conc_xmax) &
