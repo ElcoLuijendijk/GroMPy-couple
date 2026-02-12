@@ -11,13 +11,10 @@ class ModelOptions():
     Class containing various model options.
     """
 
-    # numerical backend to use for solving PDEs
-    # choices: 'escript' (default, Finite Element Method using esys-escript)
-    #          'fipy' (Finite Volume Method using FiPy)
-    backend = 'fipy'
+    verbose = False
 
     # flag to run single or multiple model scenarios
-    run_multiple_scenarios = True
+    run_multiple_scenarios = False
 
     # initial base run when running multiple model parameter sets:
     initial_base_run = False
@@ -70,9 +67,9 @@ class ModelOptions():
     model_scenario_file = ''
 
     # name for subfolder to store this set of model runs
-    model_output_dir = 'model_output/salt_wedge_benchmark'
+    model_output_dir = 'model_output/terrestrial_steady'
 
-    scenario_name = 'sw'
+    scenario_name = 'ts_steady'
 
     # option to overwrite model results or start numbering at last model found in folder
     # and append new model results to old ones
@@ -88,6 +85,7 @@ class ModelOptions():
 
 
 class ModelParameters(dict):
+
     """
     Class that contains all default model variables.
     """
@@ -101,24 +99,20 @@ class ModelParameters(dict):
     # time:
     ########
     # initial timestep size
-    dt0 = 0.25  # (sec)
+    dt0 = 5.0 * day  # (sec)
+    # multiplier for increase in timestep length after each timestep
+    dt_inc = 1.03
+    # max timestep size
+    dt_max = 10.0 * year  # (sec)
+    # total duration (sec). this is the minimum runtime if the option stop_when_steady_state is True
+    total_time = 1000.0 * year  # (sec)
 
-    # increase in timestep length after each timestep
-    # NOTE: Original value was 1.0 (no growth). Changed to 1.5 for faster simulations.
-    # With dt_inc=1.5: timesteps grow as 0.25, 0.375, 0.56, 0.84, 1.26, 1.89, ...
-    dt_inc = 1.0
+    # number of timesteps for which model stats are reported and figures are
+    # created
+    output_interval = 50.0 * year
 
-    # maximum timestep size
-    dt_max = 10.0  # (sec)
-
-    # total duration
-    total_time = 80.0 * 60.0  # (sec)
-
-    # time interval for which model stats are reported and figures are created
-    output_interval = 5.0 * 60.0
-
-    # maximum courant number allowed. Timestep sizes are reduced if
-    # courant number is exceeded
+    # maximum Courant number allowed. Timestep sizes are reduced if
+    # Courant number is exceeded
     # set to None to turn this feature off
     max_allowed_CFL_number = 1.0
     #max_allowed_CFL_number = None
@@ -128,10 +122,10 @@ class ModelParameters(dict):
     force_CFL_timestep = False
 
     # stop model run automatically when steady-state is reached
-    stop_when_steady_state = False
+    stop_when_steady_state = True
 
     # max. runtime and timesteps for model runs
-    max_runtime = 5000.0 * year
+    max_runtime = 1000.0 * year
     max_timesteps = 10000
 
     # threshold values for change in pressure and concentration for
@@ -142,52 +136,45 @@ class ModelParameters(dict):
     ##################
     # mesh parameters
     ##################
-
     # mesh type, choices:
     # 'rectangle' : rectangular mesh
-    # 'coastal' : coastal aquifer with 3 blocks, middle block at
-    #  fresh-salt water interface with grid refinement
-    #  interface calculated following Glover (1959)
-    mesh_type = 'rectangle'
+    # 'coastal' : coastal aquifer with 4 blocks.
+    #             2 middle blocks with grid refinement at left and right of
+    #             the fresh-salt water interface
+    #             fresh-salt water bnd calculated using ghyben-herzberg,
+    #             hydraulic head calculated using analytical solution gw flow
+    #             in aquifer with constant recharge
+    # "terrestrial" : simple aquifer with a stream on one side
+    mesh_type = 'standard'
 
     # thickness of model domain
-    thickness = 0.26  # (m)
-
-    # grid cell size, not used when mesh type = 'rectangle'
-    cellsize = 0.0025  # (m)
-
+    thickness = 100.0  # (m)
+    # grid cell size
+    cellsize = 10.0  # (m)
     # x and y cell size, only used when mesh type = 'rectangle'
-    cellsize_x = 0.0025  # (m)
-    cellsize_y = 0.0025  # (m)
+    cellsize_x = 1.0  # (m)
+    cellsize_y = 1.0  # (m)
 
     # length of model domain
-    # = length of landward side if coastal mesh is used
-    L = 0.53  # (m)
+    L = 1500  # (m)
 
-    #################################################################
-    ## coastal mesh params, only used if mesh_type = 'coastal'
-    #################################################################
-    # topographic gradient
-    topo_gradient = 0.00  # (m/m)
-    # length of seaward side of model domain, only used for 'coastal' mesh
-    L_sea = 0.0  # (m)
-    # distance on either side of coastline with smaller cell size
-    buffer_distance_sea = 500.0  # (m)
-    buffer_distance_land = 250.0  # (m)
-    # finer grid in middle block, only used for 3block mesh type:
-    # factor of 0.1 means 10 times smaller grid cells
-    grid_refinement_factor = 0.3
+    ## coastal mesh params:
+    # topographic gradient proximal part of system
+    topo_gradient = 0.025  # (m/m)
 
-    # finer grid at sea to make sure recirc. sgd is ok
-    grid_refinement_factor_sea = 1.0
-    grid_refinement_factor_seawater = 1.0
+    # topographic gradient after x_topo_break
+    topo_gradient_hinterland = 0.025
+
+    topo_break = False
+
+    x_topo_break = 1000.0
 
     #####################
-    # boundary conditions
+    # boundary functions
     #####################
-
     # groundwater mass flux (density x flux) over top boundary
-    recharge_flux = 0.0 / year  # (kg / (m^2 s)) (-> density * flux)
+    recharge_flux = 0.2 / year
+
     # density of recharge fluid
     recharge_density = 998.7  # (kg / m^3)
 
@@ -197,68 +184,61 @@ class ModelParameters(dict):
     # domain
     # warning: xmin and xmax not used for now due to problems with escript
     # boundary flux automatically assigned to entire land surface boundary.
-    recharge_mass_flux_xmin = 1e6  # (m)
+    recharge_mass_flux_xmin = 1e-6  # (m)
     recharge_mass_flux_xmax = 1e6  # (m)
 
     # spec pressure boundary value
-    # additional P at upper right model bnd
-    # SS-1: h= 0.267 -> dh = 0.007 m -> P = 68.569 Pa
-    # SS-2: h= 0.262 -> dh = 0.002 m -> P = 19.591 Pa
-    # SS-3: h= 0.2655 -> dh = 0.0055 m -> P = 53.876 Pa
-    specified_pressure = [0, 68.569]  # (Pa)
+    specified_pressure = 0  # (Pa)
 
     # location of specified pressure boundary
     # list of min locations
-    specified_pressure_xmin = [0.0, 0.53]
-    specified_pressure_xmax = [0.0, 0.53]
+    specified_pressure_xmin = -0.01
+    specified_pressure_xmax = 0.01
 
     # specified pressure bnd only applied to surface
-    specified_pressure_surface = False
+    specified_pressure_surface = True
 
-    # if specified_pressure_surface = False, specify y coordinates of
+    # if specified_pressure_surface is False, specify y coordinates of
     # specified pressure boundary
-    specified_pressure_ymin = [0.0, 0.0]
-    specified_pressure_ymax = [0.255, 0.260]
+    specified_pressure_ymins = [0.0]
+    specified_pressure_ymaxs = [0.0]
 
     # salinity to use for calculating hydrostatic increase in pressure
     # at pressure boundary nodes
-    specified_pressure_salinity = [0.03624, 0.0]
+    specified_pressure_salinities = [0.0]
 
-    # add pressure of overlying seawater in coastal aquifers:
-    add_seawater_pressure = False
-
-    # spec concentration boundary
-    specified_concentration = [0.03624, 0.0]  # (kg / kg)
     # spec concentration boundary location
-    specified_concentration_xmin = [0.0, 0.53]  # (m))
-    specified_concentration_xmax = [0.0, 0.53]  # (m)
+    specified_concentration_xmin = -0.01  # (m))
+    specified_concentration_xmax = 1e6  # (m)
 
     # specified pressure bnd only applied to surface
-    specified_concentration_surface = False
+    specified_concentration_surface = True
 
-    # if specified_concentration_surface = False
-    # set min and max y coordinate of specified concentration boundary
-    specified_concentration_ymin = [0.0, 0.0]  # (m))
-    specified_concentration_ymax = [0.255, 0.26]  # (m)
+    # min and max y coordinate,
+    # ignored if specified_concentration_surface = True
+    specified_concentration_ymin = [-0.01]  # (m))
+    specified_concentration_ymax = [1e6]  # (m)
 
-    # switch off concentration boundary for discharge nodes
-    concentration_bnd_inflow_only = True
+    specified_concentration = 0.0
+
+    # switch off concentration boundary for inflow nodes
+    concentration_bnd_inflow_only = False
 
     # direction of inflow, choose 'left' 'right', 'up' or 'down'
     # 'left' means that any inflow is coming from the left
-    # ie. concentration bnd will be switched off for nodes where qx > 0
-    # TODO: modify the code so that grompy recognizes what the inflow direction is
-    concentration_bnd_inflow_direction = 'left'
+    # ie. concentration bnd will be switched off for nodes where
+    # qx > 0
+    concentration_bnd_inflow_direction = 'up'
 
     # seepage boundary location
-    drain_bnd_xmin = 1e6  # (m)
-    drain_bnd_xmax = 1e6  # (m)
+    drain_bnd_xmin = -0.001  # (m)
+    drain_bnd_xmax = 1e6 # (m)
 
     # type of drain boundary
     # if True: convert drain nodes to specified head if hydraulic head
     # is above the surface
     # if False: regular flux-based drain boundary function
-    seepage_bnd = False
+    seepage_bnd = True
 
     # option to run seepage bnd only once every x timesteps:
     seepage_bnd_timestep_interval = 1
@@ -271,84 +251,82 @@ class ModelParameters(dict):
     seepage_bnd_max_time = 10000 * year
 
     # fluid source term
-    Qf = 0.0  # (kg/(m^3 s)) (= fluid mass source)
+    Qf = 0  # (kg/(m^3 s)) (= fluid mass source)
     Qf_xmin = None
     Qf_xmax = None
 
     # solute source term
-    Qs = 0.0
+    Qs = 0
     Qs_xmin = None
     Qs_xmax = None
 
     ############################
     # initial conditions params
     ############################
+
     # add Ghyben-Herzberg initial salinity distribution
     # ignored if set to False
     ghyben_herzberg = False
-    sea_water_level = 0  # (m)
-
-    # seawater and freshwater concentrations
-    seawater_concentration = 0.0  # (kg/kg)
-    freshwater_concentration = 0.0  # (kg/kg)
+    #sea_water_level = 0  # (m)
+    #seawater_concentration = 0.035  # (kg/kg)
+    #freshwater_concentration = 0.0  # (kg/kg)
 
     # derive initial pressure from analytical solution for 2D flow with
-    # uniform recharge
+    # uniform recharge. somewhat obsolete, first run is now a steady-state run to calculate initial pressure & flow
     analytical_solution_initial_h = False
 
-    # solve for pressure only using an initial steady-state model run
+    # solve for pressure only using an initial steady state run
     # and use this as initial condition for subsequent runs
     initial_steady_state_run = True
 
+    # 
+    initial_concentration = 0.035
+
     #################
     # other params
-    ##################
-    # permeability, estimate from hydraulic conductivity, using fresh water properties
-    k = 1050 / (24.0 * 60.0 * 60.0) * 8.94e-4 / (998.7 * g)  # (m^2)
-    #k = 1e-12
+    #################
+    # permeability
+    k = 10**(-12.0)  # (m^2) = median k
 
     # anisotropy (= horizontal permeability / vertical permeability)
-    anisotropy = 1.0  # (dimensionless)
+    anisotropy = 10.0
 
     #
-    porosity = 0.385  # (V/V)
+    porosity = 0.4  # (V/V)
 
-    # specific storativity
+    # specific storage
     specific_storage = 1.0e-4  # (...)
 
     # longitudinal dispersivity
-    l_disp = 0.001  # (m)
+    l_disp = 50.0  # (m)
     # transverse dispersivity ratio
     # used to calculate transverse dispersivity (transverse_disp = disp_ratio * l_disp)
     disp_ratio = 0.1  # (dimensionless)
 
-    ## settings for iterative solver solute & pressure PDEs
-    pressure_convergence_criterion = 1.0e-7  # [Pa]
+    # settings for iterative solver solute & pressure PDEs following Ackerer (2004) GRL 31(2):
+    pressure_convergence_criterion = 1.0e-4  # [Pa]
     concentration_convergence_criterion = 1.0e-7  # [kg/kg]
-
-    # maximum iterations for sequential iterative solving of solute transport and
-    # fluid flow equations
-    min_iterations = 4
+    # maximum iterations for sequential iterative solving of solute and
+    # pressure equations
+    min_iterations = 3
     max_iterations = 200
 
     # fluid viscosity
     # note, grompy can also automatically calculate viscosity from concentration and temperature data following
     # Batzle and Wang (1992). This option is controlled by calculate_viscosity in the iterate_coupled_flow_eqs function
     # in the module gwflow_lib
+    calculate_viscosity = False
     viscosity = 8.94e-4
     reference_porosity = 0.25  # (non dimensional)
     reference_density = 1000.0  # [kg m-3]
 
-    ## eq. of state constants
+    # eq. of state constants
+    # density of water at solute concentration = 0 (and T=20 C)
+    rho_f_0 = 998.872  # [kg m^-3]
     # thermal expansion coefficient
     alpha = 207e-6  # (1/K)
-    #  density of water at solute concentration = 0 (and T=20 C)
-    rho_f_0 = 998.872  # (kg/m^3)
     # solute expansion coefficient
-    #gamma = 0.68412  # (dimensionless) -> linear fit to Batzle & Wang (1992)
-    # calculate solute expansion coefficient for salt water intrusion
-    # experiment by Goswami & Clement (2007)
-    gamma = (1026.0 - rho_f_0) / (0.03624 * rho_f_0)  # (dimensionless)
+    gamma = 0.68412  # (dimensionless)
 
     # solute diffusion coefficient
     diffusivity = 1.0e-9  # (m^2/s^1)
@@ -374,16 +352,6 @@ class ParameterRanges():
     change parameter topo_gradient in the ``model_parameters.py`` file and
     will first run a model scenario with a gradient of 0.01 and then one
     with a gradient of 0.1
-
-    variables can be either lists, tuples or numpy arrays
-
-    set value to None to ignore the parameter range and use the default value
-    that is specified in the ModelParameters class
-
     """
 
-    # specified pressure in model experiments Goswami and Clement (2007):
-    # SS-1: h= 0.267 -> dh = 0.007 m -> P = 68.569 Pa
-    # SS-2: h= 0.262 -> dh = 0.002 m -> P = 19.591 Pa
-    # SS-3: h= 0.2655 -> dh = 0.0055 m -> P = 53.876 Pa
-    specified_pressure_s = [[0, 68.569], [0, 19.591], [0, 53.876]]
+    pass

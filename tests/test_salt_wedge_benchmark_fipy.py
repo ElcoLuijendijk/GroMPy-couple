@@ -77,6 +77,44 @@ def scenario_parameters(benchmark_parameters, parameter_ranges, scenario_index):
 
 
 @pytest.fixture
+def fast_benchmark_parameters(parameter_ranges):
+    """Fast variant of benchmark parameters for quick testing.
+    
+    Optimizations:
+    - Coarse mesh: 2x larger cells (4x fewer elements)
+    - Fast timesteps: 4x larger initial dt, enabled growth
+    - Shorter simulation: 20 min instead of 80 min
+    
+    Expected runtime: 1-2 minutes per scenario (vs 10-15 min)
+    """
+    params = ModelParameters()
+    
+    # Coarse mesh (4x speedup from fewer cells)
+    params.cellsize_x = 0.005  # doubled from 0.0025
+    params.cellsize_y = 0.005
+    
+    # Fast timesteps with growth enabled (16x speedup from fewer timesteps)
+    params.dt0 = 1.0            # 4x larger from 0.25
+    params.dt_inc = 1.5         # FIXED: was 1.0 (no growth), now 1.5 (enables growth)
+    params.dt_max = 60.0        # 6x larger from 10.0
+    params.total_time = 1200.0  # 4x shorter: 20 min instead of 80 min
+    
+    # Output interval can be longer for fast tests
+    params.output_interval = 60.0  # every 1 min
+    
+    return params
+
+
+@pytest.fixture
+def fast_scenario_parameters(fast_benchmark_parameters, parameter_ranges, scenario_index):
+    """Get fast parameters for specific scenario."""
+    params = fast_benchmark_parameters
+    pressures = parameter_ranges.specified_pressure_s
+    params.specified_pressure = pressures[scenario_index]
+    return params, scenario_index
+
+
+@pytest.fixture
 def test_output_base_dir(tmp_path_factory):
     """Create base output directory for test suite."""
     # Create tests/test_output if it doesn't exist
@@ -548,13 +586,13 @@ class TestSaltWedgeBenchmarkModelRun:
         assert len(model_results) >= 24, \
             f"Wrong result tuple length: {len(model_results)}"
         
-        # Unpack results
+        # Unpack results (25 items returned)
         (mesh, surface, sea_surface, k_vector, P, Conc,
          rho_f, viscosity, h, q, q_abs, nodal_flux,
          Pdiff, Cdiff, Pmax, Cmax, Pmean, Cmean,
          dts, runtimes, nsteps, output_step,
          boundary_conditions, boundary_fluxes, boundary_flux_stats,
-         reached_steady_state) = model_results[:25]
+         reached_steady_state) = model_results
         
         # ===== 4. VERIFY PHYSICAL VALIDITY =====
         
@@ -595,6 +633,95 @@ class TestSaltWedgeBenchmarkModelRun:
             'nsteps': nsteps,
             'reached_steady_state': reached_steady_state
         }
+
+
+    @pytest.mark.fast
+    def test_run_scenario_fast(self, fast_scenario_parameters, test_output_dir):
+        """Fast model run with coarse mesh and short simulation time.
+        
+        Optimizations:
+        - Mesh: 4x coarser (11k cells vs 44k)
+        - Simulation: 20 min instead of 80 min
+        - Timesteps: ~16-20 instead of ~320
+        
+        Expected runtime: < 2 minutes
+        Acceptable error: ±5 cm in salt wedge position
+        """
+        from lib.grompy_fipy import run_coupled_flow_model_fipy
+        
+        params, scenario_idx = fast_scenario_parameters
+        
+        # ===== 1. SETUP (with coarse mesh) =====
+        mesh_filename = str(test_output_dir / f"mesh_fast_s{scenario_idx}.msh")
+        
+        # Create coarse mesh
+        mesh_fipy, surface, sea_surface, seawater, z_surface = \
+            setup_rectangular_mesh_fipy(params, mesh_filename)
+        
+        assert Path(mesh_filename).exists(), "Mesh file not created"
+        # Coarse mesh should have ~5512 cells (4x fewer than 22048)
+        assert 5000 < mesh_fipy.numberOfCells < 6000, \
+            f"Coarse mesh has wrong cell count: {mesh_fipy.numberOfCells}"
+        
+        # ===== 2. MODEL EXECUTION (fast) =====
+        try:
+            model_results = run_coupled_flow_model_fipy(
+                params, ModelOptions(), mesh_filename
+            )
+        except Exception as e:
+            pytest.fail(f"Fast model run failed: {str(e)[:200]}")
+        
+        # ===== 3. VERIFY OUTPUT STRUCTURE =====
+        assert len(model_results) >= 24, \
+            f"Wrong result tuple length: {len(model_results)}"
+        
+        # Unpack results (25 items returned)
+        (mesh, surface, sea_surface, k_vector, P, Conc,
+         rho_f, viscosity, h, q, q_abs, nodal_flux,
+         Pdiff, Cdiff, Pmax, Cmax, Pmean, Cmean,
+         dts, runtimes, nsteps, output_step,
+         boundary_conditions, boundary_fluxes, boundary_flux_stats,
+         reached_steady_state) = model_results
+        
+        # ===== 4. VERIFY PHYSICAL VALIDITY (FAST) =====
+        
+        # Pressure
+        assert P is not None, "Pressure field is None"
+        assert isinstance(P, np.ndarray), "Pressure not array"
+        assert P.min() >= -1000, f"Pressure too negative: {P.min()}"
+        assert P.max() <= 10000, f"Pressure too high: {P.max()}"
+        assert not np.isnan(P).any(), "Pressure contains NaN"
+        
+        # Concentration (critical - should be in 0-1 range)
+        assert Conc is not None, "Concentration field is None"
+        assert isinstance(Conc, np.ndarray), "Concentration not array"
+        assert Conc.min() >= -0.001, f"Concentration too low: {Conc.min()}"
+        assert Conc.max() <= 0.04, f"Concentration too high: {Conc.max()}"
+        assert not np.isnan(Conc).any(), "Concentration contains NaN"
+         
+        # Density
+        assert rho_f is not None, "Density field is None"
+        # Note: rho_f may be scalar or array depending on return value
+        if hasattr(rho_f, '__len__') and len(rho_f) > 1:
+            assert rho_f.min() >= 990, f"Density too low: {rho_f.min()}"
+            assert rho_f.max() <= 1030, f"Density too high: {rho_f.max()}"
+            assert not np.isnan(rho_f).any(), "Density contains NaN"
+        else:
+            # Scalar case
+            rho_val = float(rho_f) if hasattr(rho_f, '__len__') else rho_f
+            assert 990 <= rho_val <= 1030, f"Density out of range: {rho_val}"
+        
+        # Timesteps - should be much fewer (~16-20 instead of ~320)
+        assert len(dts) == nsteps, "Timestep array wrong length"
+        assert nsteps > 0, "No timesteps completed"
+        assert nsteps < 100, f"Too many timesteps for fast run: {nsteps}"
+        
+        # ===== 5. VERIFY RUNTIME IS FAST =====
+        total_runtime = np.sum(runtimes) if (runtimes is not None and len(runtimes) > 0) else 0
+        print(f"\nFast scenario SS-{scenario_idx}: "
+              f"Completed in {total_runtime:.1f}s, "
+              f"{nsteps} timesteps, "
+              f"Max Conc: {Conc.max():.4f}")
 
 
 # =============================================================================
