@@ -914,3 +914,129 @@ class TestCompareWithExperimentalData:
         print(f"  Depth RMSE:  {rmse_depth*100:7.2f} cm")
         print(f"  Tolerance:   {tolerance_depth*100:7.2f} cm (PASS)")
         print(f"{'='*60}\n")
+
+
+@pytest.mark.comparison
+class TestConvectionSchemeComparison:
+    """Compare all 5 FiPy convection schemes on salt wedge benchmark."""
+    
+    @pytest.mark.parametrize('scheme', ['central', 'upwind', 'powerlaw', 'vanleer', 'exponential'])
+    def test_scheme_comparison_ss1(self, scheme, fast_benchmark_parameters, test_output_dir):
+        """Compare all 5 convection schemes on SS-1 (high flux) scenario.
+        
+        Metrics recorded:
+        - Runtime duration
+        - Number of timesteps
+        - Concentration statistics (max, min, mean)
+        - Solution validity (no NaN, physical bounds)
+        """
+        import time
+        from lib.grompy_fipy import run_coupled_flow_model_fipy
+        
+        params, scenario_idx = fast_benchmark_parameters
+        mesh_filename = str(test_output_dir / f"mesh_{scheme}_ss1.msh")
+        
+        # Setup mesh
+        mesh_fipy, _, _, _, _ = setup_rectangular_mesh_fipy(params, mesh_filename)
+        
+        # Run model with specific scheme
+        start_time = time.time()
+        try:
+            model_results = run_coupled_flow_model_fipy(
+                params, ModelOptions(), mesh_filename, convection_scheme=scheme
+            )
+        except Exception as e:
+            pytest.fail(f"Scheme '{scheme}' failed: {str(e)[:200]}")
+        
+        runtime = time.time() - start_time
+        
+        # Unpack results
+        (mesh, surface, sea_surface, k_vector, P, Conc,
+         rho_f, viscosity, h, q, q_abs, nodal_flux,
+         Pdiff, Cdiff, Pmax, Cmax, Pmean, Cmean,
+         dts, runtimes, nsteps, output_step,
+         boundary_conditions, boundary_fluxes, boundary_flux_stats,
+         reached_steady_state) = model_results
+        
+        # Check for NaN
+        assert not np.isnan(Conc).any(), f"NaN in concentration for scheme '{scheme}'"
+        assert not np.isnan(P).any(), f"NaN in pressure for scheme '{scheme}'"
+        
+        # Check physical bounds
+        assert Conc.min() >= -0.001, f"Negative concentration for scheme '{scheme}': {Conc.min()}"
+        assert Conc.max() <= 0.04, f"Excessive concentration for scheme '{scheme}': {Conc.max()}"
+        
+        # Print results
+        print(f"\n{'='*70}")
+        print(f"Convection Scheme: {scheme:12s}")
+        print(f"{'='*70}")
+        print(f"  Runtime:           {runtime:8.2f} s")
+        print(f"  Timesteps:         {nsteps:8d}")
+        print(f"  Concentration:     min={Conc.min():.4f}, max={Conc.max():.4f}, mean={Conc.mean():.4f}")
+        print(f"  Pressure (Pa):     min={P.min():.1f}, max={P.max():.1f}")
+        print(f"  Steady state:      {reached_steady_state}")
+        print(f"{'='*70}\n")
+        
+        # Record metrics for comparison
+        assert True  # At least the scheme ran without error
+    
+    def test_scheme_comparison_summary(self, fast_scenario_parameters, test_output_dir):
+        """Run all schemes and print summary comparison."""
+        import time
+        from lib.grompy_fipy import run_coupled_flow_model_fipy
+        from lib.mesh_functions_fipy import setup_rectangular_mesh_fipy
+        
+        schemes = ['central', 'upwind', 'powerlaw', 'vanleer', 'exponential']
+        params, scenario_idx = fast_scenario_parameters
+        results = {}
+        
+        # Create mesh once
+        mesh_filename = str(test_output_dir / "mesh_comparison.msh")
+        mesh_fipy, _, _, _, _ = setup_rectangular_mesh_fipy(params, mesh_filename)
+        
+        print(f"\n\n{'='*80}")
+        print(f"CONVECTION SCHEME COMPARISON - Scenario SS-{scenario_idx+1}")
+        print(f"{'='*80}\n")
+        print(f"{'Scheme':12s} {'Runtime (s)':>12s} {'Timesteps':>12s} {'Max C':>12s} {'Min C':>12s} {'Status':>10s}")
+        print(f"{'-'*80}")
+        
+        for scheme in schemes:
+             try:
+                 start_time = time.time()
+                 model_results = run_coupled_flow_model_fipy(
+                     params, ModelOptions(), mesh_filename, convection_scheme=scheme
+                 )
+                 runtime = time.time() - start_time
+                 
+                 (mesh, surface, sea_surface, k_vector, P, Conc,
+                  rho_f, viscosity, h, q, q_abs, nodal_flux,
+                  Pdiff, Cdiff, Pmax, Cmax, Pmean, Cmean,
+                  dts, runtimes, nsteps, output_step,
+                  boundary_conditions, boundary_fluxes, boundary_flux_stats,
+                  reached_steady_state) = model_results
+                 
+                 status = "OK" if not np.isnan(Conc).any() else "NaN"
+                 results[scheme] = {
+                     'runtime': runtime,
+                     'nsteps': nsteps,
+                     'Cmax': Conc.max(),
+                     'Cmin': Conc.min(),
+                     'status': status
+                 }
+                 
+                 print(f"{scheme:12s} {runtime:12.2f} {nsteps:12d} {Conc.max():12.4f} {Conc.min():12.4f} {status:>10s}")
+                 
+             except Exception as e:
+                 print(f"{scheme:12s} {'FAILED':>12s} {'':>12s} {'':>12s} {'':>12s} {'ERROR':>10s}")
+                 print(f"  Error: {str(e)}")
+                 results[scheme] = {'error': str(e)[:50]}
+        
+        print(f"{'-'*80}\n")
+        
+        # Find best scheme
+        valid_schemes = {s: r for s, r in results.items() if 'error' not in r}
+        if valid_schemes:
+            best_runtime = min(valid_schemes.values(), key=lambda x: x['runtime'])
+            best_scheme = [s for s, r in valid_schemes.items() if r == best_runtime][0]
+            print(f"Fastest scheme: {best_scheme} ({best_runtime['runtime']:.2f} s)\n")
+            print(f"{'='*80}\n")

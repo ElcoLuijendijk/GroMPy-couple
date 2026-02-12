@@ -34,6 +34,12 @@ from lib.backend.fipy_backend import FiPyBackend, FiPyField, FiPyMesh, FiPyPDESo
 try:
     import fipy
     from fipy import CellVariable, FaceVariable, DiffusionTerm, DiffusionTermCorrection, ConvectionTerm, TransientTerm
+    from fipy import (
+        UpwindConvectionTerm,
+        PowerLawConvectionTerm,
+        VanLeerConvectionTerm,
+        ExponentialConvectionTerm
+    )
     from fipy.tools import numerix
     FIPY_AVAILABLE = True
 except ImportError:
@@ -618,12 +624,52 @@ def solve_steady_state_pressure_fipy(
     return np.array(pressure.value)
 
 
+
+def get_convection_term(velocity, scheme='exponential'):
+    """
+    Create a convection term using the specified FiPy advection scheme.
+    
+    Parameters
+    ----------
+    velocity : FaceVariable
+        The velocity field (Darcy velocity / porosity)
+    scheme : str, optional
+        Convection scheme to use. Options:
+        - 'central': ConvectionTerm (standard, can oscillate at high Pe)
+        - 'upwind': UpwindConvectionTerm (stable, diffusive)
+        - 'powerlaw': PowerLawConvectionTerm (good for Pe < 100)
+        - 'vanleer': VanLeerConvectionTerm (TVD, excellent for sharp interfaces)
+        - 'exponential': ExponentialConvectionTerm (default, exact for 1D, best for high Pe)
+    
+    Returns
+    -------
+    ConvectionTerm-like object
+        The appropriate convection term for the advection-diffusion equation
+    """
+    scheme_lower = scheme.lower().strip()
+    
+    if scheme_lower == 'upwind':
+        return UpwindConvectionTerm(coeff=velocity)
+    elif scheme_lower == 'powerlaw':
+        return PowerLawConvectionTerm(coeff=velocity)
+    elif scheme_lower == 'vanleer':
+        return VanLeerConvectionTerm(coeff=velocity)
+    elif scheme_lower == 'exponential':
+        return ExponentialConvectionTerm(coeff=velocity)
+    elif scheme_lower == 'central':
+        return ConvectionTerm(coeff=velocity)
+    else:
+        # Default to Exponential
+        print(f"Warning: Unknown convection scheme '{scheme}', using 'exponential'")
+        return ExponentialConvectionTerm(coeff=velocity)
+
+
 def solve_solute_transport_fipy(
     fipy_mesh, backend, concentration_old, dt,
     pressure, density, k_tensor, viscosity, g,
     porosity, diffusivity, l_disp, t_disp,
     spec_conc_mask, specified_concentration,
-    Parameters, use_tensor_dispersion=True
+    Parameters, use_tensor_dispersion=True, convection_scheme='exponential'
 ):
     """
     Solve solute transport equation using FiPy.
@@ -718,14 +764,16 @@ def solve_solute_transport_fipy(
         constraint_source = CellVariable(mesh=fipy_mesh, value=0.0)
         constraint_source.setValue(-large_value * specified_concentration, where=spec_conc_mask)
         
+        convection_term = get_convection_term(velocity, scheme=convection_scheme)
         eq = (TransientTerm(coeff=porosity) 
-              + ConvectionTerm(coeff=velocity)
+              + convection_term
               == diffusion_term
               + ImplicitSourceTerm(coeff=constraint_coeff)
               - constraint_source)
     else:
+        convection_term = get_convection_term(velocity, scheme=convection_scheme)
         eq = (TransientTerm(coeff=porosity) 
-              + ConvectionTerm(coeff=velocity)
+              + convection_term
               == diffusion_term)
     
     # Solve for one timestep
@@ -734,7 +782,7 @@ def solve_solute_transport_fipy(
     return np.array(concentration.value)
 
 
-def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename):
+def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convection_scheme='exponential'):
     """
     Run coupled groundwater flow and solute transport model using FiPy backend.
     
@@ -748,6 +796,13 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename):
         Model options (from model_parameters.py)
     mesh_filename : str
         Path to the Gmsh mesh file
+    convection_scheme : str, optional
+        Convection scheme for solute transport. Options:
+        - 'exponential': ExponentialConvectionTerm (default, best for high Pe numbers)
+        - 'upwind': UpwindConvectionTerm (stable, diffusive)
+        - 'powerlaw': PowerLawConvectionTerm (good for Pe < 100)
+        - 'vanleer': VanLeerConvectionTerm (TVD, excellent for sharp interfaces)
+        - 'central': ConvectionTerm (standard, can oscillate at high Pe)
     
     Returns
     -------
@@ -866,7 +921,7 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename):
                 Parameters.diffusivity, Parameters.l_disp,
                 Parameters.l_disp * Parameters.disp_ratio,
                 bc['spec_conc_mask'], bc['specified_concentration'],
-                Parameters, use_tensor_dispersion=True
+                Parameters, use_tensor_dispersion=True, convection_scheme=convection_scheme
             )
             
             # Check for convergence / steady state
