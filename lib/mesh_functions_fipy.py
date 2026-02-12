@@ -123,7 +123,8 @@ def setup_rectangular_mesh_fipy(Parameters, mesh_filename):
     Create a rectangular mesh using FiPy's Grid2D.
     
     This is a simple implementation that doesn't require Gmsh - it uses
-    FiPy's built-in Grid2D mesh constructor.
+    FiPy's built-in Grid2D mesh constructor. The mesh is saved to a .msh file
+    for consistency with other mesh functions and for later loading.
     
     Parameters
     ----------
@@ -134,7 +135,7 @@ def setup_rectangular_mesh_fipy(Parameters, mesh_filename):
         - cellsize_x: cell size in x direction
         - cellsize_y: cell size in y direction
     mesh_filename : str
-        Not used for Grid2D, but kept for interface compatibility
+        Path where the .msh file will be saved
         
     Returns
     -------
@@ -161,6 +162,45 @@ def setup_rectangular_mesh_fipy(Parameters, mesh_filename):
         nx=nx,
         ny=ny
     )
+    
+    # Save mesh to file using meshio for consistency with other mesh functions
+    try:
+        import meshio
+        
+        # Ensure directory exists
+        mesh_dir = os.path.dirname(mesh_filename)
+        if mesh_dir and not os.path.exists(mesh_dir):
+            os.makedirs(mesh_dir)
+        
+        # Convert FiPy Grid2D to meshio format
+        # Extract vertex coordinates (2 x n_vertices) -> (n_vertices x 3)
+        vertex_coords = mesh.vertexCoords.T
+        points = np.column_stack([vertex_coords, np.zeros(vertex_coords.shape[0])])
+        
+        # Extract quad cell connectivity: ordered cell vertex IDs (4 x n_cells) -> (n_cells x 4)
+        quads = mesh._orderedCellVertexIDs.T
+        
+        # Convert quads to triangles: each quad [0,1,2,3] -> 2 triangles [0,1,2] and [0,2,3]
+        triangles = []
+        for quad in quads:
+            # First triangle: vertices 0, 1, 2
+            triangles.append([quad[0], quad[1], quad[2]])
+            # Second triangle: vertices 0, 2, 3
+            triangles.append([quad[0], quad[2], quad[3]])
+        triangles = np.array(triangles)
+        
+        # Create meshio mesh with triangular cells and write to ASCII gmsh22 file
+        mesh_data = meshio.Mesh(
+            points,
+            [("triangle", triangles)],  # 3-node triangular cells
+        )
+        mesh_data.write(mesh_filename, file_format="gmsh22", binary=False)
+        print(f"Rectangular mesh saved to: {mesh_filename}")
+        
+    except ImportError:
+        print("Warning: meshio not available. Mesh will not be saved to file.")
+    except Exception as e:
+        print(f"Warning: Failed to save mesh to file: {e}")
     
     # Get cell centers
     cell_centers = mesh.cellCenters
