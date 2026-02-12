@@ -11,6 +11,11 @@ class ModelOptions():
     Class containing various model options.
     """
 
+    # numerical backend to use for solving PDEs
+    # choices: 'escript' (default, Finite Element Method using esys-escript)
+    #          'fipy' (Finite Volume Method using FiPy)
+    backend = 'fipy'
+
     # flag to run single or multiple model scenarios
     run_multiple_scenarios = True
 
