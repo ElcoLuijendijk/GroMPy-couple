@@ -106,7 +106,7 @@ class ModelParameters(dict):
     # increase in timestep length after each timestep
     # NOTE: Original value was 1.0 (no growth). Changed to 1.5 for faster simulations.
     # With dt_inc=1.5: timesteps grow as 0.25, 0.375, 0.56, 0.84, 1.26, 1.89, ...
-    dt_inc = 1.0
+    dt_inc = 1.5
 
     # maximum timestep size
     dt_max = 10.0  # (sec)
@@ -323,13 +323,13 @@ class ModelParameters(dict):
     disp_ratio = 0.1  # (dimensionless)
 
     ## settings for iterative solver solute & pressure PDEs
-    pressure_convergence_criterion = 1.0e-7  # [Pa]
-    concentration_convergence_criterion = 1.0e-7  # [kg/kg]
+    pressure_convergence_criterion = 1.0e-5  # [Pa]
+    concentration_convergence_criterion = 1.0e-5  # [kg/kg]
 
     # maximum iterations for sequential iterative solving of solute transport and
     # fluid flow equations
     min_iterations = 4
-    max_iterations = 200
+    max_iterations = 20
 
     # fluid viscosity
     # note, grompy can also automatically calculate viscosity from concentration and temperature data following
