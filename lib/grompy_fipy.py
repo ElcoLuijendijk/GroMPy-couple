@@ -422,25 +422,49 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
         surface_mask
     )
     
-    # Specified concentration boundary
-    spec_conc_xmin = get_param('specified_concentration_xmin', -0.01)
-    spec_conc_xmax = get_param('specified_concentration_xmax', 1e6)
+    # Specified concentration boundary - loop through all regions
+    spec_conc_xmin = get_param('specified_concentration_xmin', [-0.01])
+    spec_conc_xmax = get_param('specified_concentration_xmax', [1e6])
+    spec_conc_ymin = get_param('specified_concentration_ymin', [-0.01])
+    spec_conc_ymax = get_param('specified_concentration_ymax', [1e6])
+    spec_conc_values = get_param('specified_concentration', [0.0])
     
-    # Handle both list and scalar values
-    if isinstance(spec_conc_xmin, (list, tuple)):
-        spec_conc_xmin = spec_conc_xmin[0] if spec_conc_xmin else -0.01
-    if isinstance(spec_conc_xmax, (list, tuple)):
-        spec_conc_xmax = spec_conc_xmax[0] if spec_conc_xmax else 1e6
-    
-    spec_conc_mask = (
-        (x >= spec_conc_xmin) &
-        (x <= spec_conc_xmax) &
-        sea_surface_mask
-    )
+    # Ensure all are lists
+    if not isinstance(spec_conc_xmin, (list, tuple)):
+        spec_conc_xmin = [spec_conc_xmin]
+    if not isinstance(spec_conc_xmax, (list, tuple)):
+        spec_conc_xmax = [spec_conc_xmax]
+    if not isinstance(spec_conc_ymin, (list, tuple)):
+        spec_conc_ymin = [spec_conc_ymin]
+    if not isinstance(spec_conc_ymax, (list, tuple)):
+        spec_conc_ymax = [spec_conc_ymax]
+    if not isinstance(spec_conc_values, (list, tuple)):
+        spec_conc_values = [spec_conc_values]
     
     specified_concentration = np.zeros(n_cells)
-    seawater_conc = get_param('seawater_concentration', 0.035)
-    specified_concentration[spec_conc_mask] = seawater_conc
+    
+    # Loop through all boundary regions
+    for i_region in range(len(spec_conc_xmin)):
+        xmin = spec_conc_xmin[i_region]
+        xmax = spec_conc_xmax[i_region]
+        ymin = spec_conc_ymin[i_region]
+        ymax = spec_conc_ymax[i_region]
+        conc_val = spec_conc_values[i_region] if i_region < len(spec_conc_values) else 0.0
+        
+        # Create mask for this region
+        region_mask = (
+            (x >= xmin) &
+            (x <= xmax) &
+            (y >= ymin) &
+            (y <= ymax) &
+            sea_surface_mask
+        )
+        
+        # Apply boundary condition for this region
+        specified_concentration[region_mask] = conc_val
+    
+    # Create combined mask for return value (for compatibility)
+    spec_conc_mask = specified_concentration > -9999  # All non-zero entries
     
     return {
         'surface': surface_mask,
@@ -895,6 +919,50 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
         )
         print("Steady-state pressure solve complete")
         print(f"Pressure range: {pressure.min():.2f} to {pressure.max():.2f} Pa")
+        
+        # Enforce concentration boundary conditions after steady-state pressure solve
+        spec_conc_xmin = bc['spec_conc_xmin'] if 'spec_conc_xmin' in bc else Parameters.specified_concentration_xmin
+        spec_conc_xmax = bc['spec_conc_xmax'] if 'spec_conc_xmax' in bc else Parameters.specified_concentration_xmax
+        spec_conc_ymin = Parameters.specified_concentration_ymin
+        spec_conc_ymax = Parameters.specified_concentration_ymax
+        spec_conc_values = Parameters.specified_concentration
+        
+        # Ensure all are lists
+        if not isinstance(spec_conc_xmin, (list, tuple)):
+            spec_conc_xmin = [spec_conc_xmin]
+        if not isinstance(spec_conc_xmax, (list, tuple)):
+            spec_conc_xmax = [spec_conc_xmax]
+        if not isinstance(spec_conc_ymin, (list, tuple)):
+            spec_conc_ymin = [spec_conc_ymin]
+        if not isinstance(spec_conc_ymax, (list, tuple)):
+            spec_conc_ymax = [spec_conc_ymax]
+        if not isinstance(spec_conc_values, (list, tuple)):
+            spec_conc_values = [spec_conc_values]
+        
+        # Get x and y cell centers
+        x = cell_centers[0]
+        y = cell_centers[1]
+        
+        # Apply concentration boundary conditions
+        for i_region in range(len(spec_conc_xmin)):
+            xmin = spec_conc_xmin[i_region]
+            xmax = spec_conc_xmax[i_region]
+            ymin = spec_conc_ymin[i_region]
+            ymax = spec_conc_ymax[i_region]
+            conc_val = spec_conc_values[i_region] if i_region < len(spec_conc_values) else 0.0
+            
+            # Create mask for this region
+            mask = (
+                (x >= xmin) &
+                (x <= xmax) &
+                (y >= ymin) &
+                (y <= ymax)
+            )
+            
+            # Apply boundary condition
+            concentration[mask] = conc_val
+        
+        print(f"Concentration range after BC enforcement: {concentration.min():.6f} to {concentration.max():.6f}")
     
     # Create output directory
     output_dir = ModelOptions.model_output_dir

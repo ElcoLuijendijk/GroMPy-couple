@@ -289,7 +289,7 @@ class ModelParameters(dict):
     sea_water_level = 0  # (m)
 
     # seawater and freshwater concentrations
-    seawater_concentration = 0.0  # (kg/kg)
+    seawater_concentration = 0.03624  # (kg/kg)
     freshwater_concentration = 0.0  # (kg/kg)
 
     # derive initial pressure from analytical solution for 2D flow with
