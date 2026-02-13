@@ -940,8 +940,8 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
             spec_conc_values = [spec_conc_values]
         
         # Get x and y cell centers
-        x = cell_centers[0]
-        y = cell_centers[1]
+        x = cell_centers[:, 0]
+        y = cell_centers[:, 1]
         
         # Apply concentration boundary conditions
         for i_region in range(len(spec_conc_xmin)):
