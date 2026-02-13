@@ -428,6 +428,7 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
     spec_conc_ymin = get_param('specified_concentration_ymin', [-0.01])
     spec_conc_ymax = get_param('specified_concentration_ymax', [1e6])
     spec_conc_values = get_param('specified_concentration', [0.0])
+    specified_concentration_surface = get_param('specified_concentration_surface', False)
     
     # Ensure all are lists
     if not isinstance(spec_conc_xmin, (list, tuple)):
@@ -443,6 +444,19 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
     
     specified_concentration = np.zeros(n_cells)
     
+    # Tolerance for boundary matching (allow cells within one cell size of boundary)
+    unique_x = np.unique(x)
+    unique_y = np.unique(y)
+    if len(unique_x) > 1:
+        dx = np.mean(np.diff(unique_x))
+    else:
+        dx = 0.001
+    if len(unique_y) > 1:
+        dy = np.mean(np.diff(unique_y))
+    else:
+        dy = 0.001
+    tol = max(dx, dy)
+    
     # Loop through all boundary regions
     for i_region in range(len(spec_conc_xmin)):
         xmin = spec_conc_xmin[i_region]
@@ -452,13 +466,30 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
         conc_val = spec_conc_values[i_region] if i_region < len(spec_conc_values) else 0.0
         
         # Create mask for this region
-        region_mask = (
-            (x >= xmin) &
-            (x <= xmax) &
-            (y >= ymin) &
-            (y <= ymax) &
-            sea_surface_mask
-        )
+        if specified_concentration_surface:
+            # If applying to entire surface, use sea_surface_mask as before
+            region_mask = (
+                (x >= xmin) &
+                (x <= xmax) &
+                (y >= ymin) &
+                (y <= ymax) &
+                sea_surface_mask
+            )
+        else:
+            # If applying to specific x,y regions, don't require sea_surface_mask
+            # For vertical boundaries (xmin == xmax), use tolerance
+            if abs(xmax - xmin) < tol:
+                x_match = np.abs(x - xmin) <= tol
+            else:
+                x_match = (x >= xmin) & (x <= xmax)
+            
+            # For horizontal boundaries (ymin == ymax), use tolerance
+            if abs(ymax - ymin) < tol:
+                y_match = np.abs(y - ymin) <= tol
+            else:
+                y_match = (y >= ymin) & (y <= ymax)
+            
+            region_mask = x_match & y_match & surface_mask
         
         # Apply boundary condition for this region
         specified_concentration[region_mask] = conc_val
@@ -943,6 +974,10 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
         x = cell_centers[:, 0]
         y = cell_centers[:, 1]
         
+        # Tolerance for boundary matching (allow cells within one cell size of boundary)
+        tol = max(np.mean(np.diff(np.sort(np.unique(x)))), 
+                  np.mean(np.diff(np.sort(np.unique(y)))))
+        
         # Apply concentration boundary conditions
         for i_region in range(len(spec_conc_xmin)):
             xmin = spec_conc_xmin[i_region]
@@ -951,13 +986,23 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
             ymax = spec_conc_ymax[i_region]
             conc_val = spec_conc_values[i_region] if i_region < len(spec_conc_values) else 0.0
             
-            # Create mask for this region
-            mask = (
-                (x >= xmin) &
-                (x <= xmax) &
-                (y >= ymin) &
-                (y <= ymax)
-            )
+            # Create mask for this region with tolerance
+            # For boundaries at exact locations (xmin == xmax), use tolerance to find nearby cells
+            if abs(xmax - xmin) < tol:
+                # This is a vertical line boundary - match cells within tolerance
+                mask = (
+                    (np.abs(x - xmin) <= tol) &
+                    (y >= ymin) &
+                    (y <= ymax)
+                )
+            else:
+                # This is a region - match cells within bounds
+                mask = (
+                    (x >= xmin) &
+                    (x <= xmax) &
+                    (y >= ymin) &
+                    (y <= ymax)
+                )
             
             # Apply boundary condition
             concentration[mask] = conc_val
