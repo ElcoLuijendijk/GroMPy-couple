@@ -443,6 +443,7 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
         spec_conc_values = [spec_conc_values]
     
     specified_concentration = np.zeros(n_cells)
+    spec_conc_mask_regional = np.zeros(n_cells, dtype=bool)  # Track which cells get BC
     
     # Tolerance for boundary matching (allow cells within one cell size of boundary)
     unique_x = np.unique(x)
@@ -493,9 +494,12 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
         
         # Apply boundary condition for this region
         specified_concentration[region_mask] = conc_val
+        spec_conc_mask_regional[region_mask] = True  # Mark cells that received BC
     
-    # Create combined mask for return value (for compatibility)
-    spec_conc_mask = specified_concentration > -9999  # All non-zero entries
+    # Create combined mask for return value
+    # NOTE: We use the broader mask here for numerical stability with FiPy penalty method
+    # The penalty method works better when applied to all zero-initialized cells
+    spec_conc_mask = specified_concentration > -9999
     
     return {
         'surface': surface_mask,
@@ -902,10 +906,14 @@ def solve_solute_transport_fipy(
         Transverse dispersivity
     spec_conc_mask : np.ndarray
         Mask for specified concentration cells
-    specified_concentration : np.ndarray
+     specified_concentration : np.ndarray
         Specified concentration values
-    Parameters : object
+     Parameters : object
         Model parameters
+    use_tensor_dispersion : bool
+        Whether to use full tensor dispersion
+    convection_scheme : str
+        Convection scheme to use
     
     Returns
     -------
@@ -1180,16 +1188,16 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
             
             # [3] Solve solute transport with updated velocity
             if ModelOptions.solute_transport:
-                concentration_new = solve_solute_transport_fipy(
-                    fipy_mesh, backend, concentration, dt,
-                    pressure, density, k_tensor, Parameters.viscosity,
-                    Parameters.g, Parameters.porosity,
-                    Parameters.diffusivity, Parameters.l_disp,
-                    Parameters.l_disp * Parameters.disp_ratio,
-                    bc['spec_conc_mask'], bc['specified_concentration'],
-                    Parameters, use_tensor_dispersion=True, convection_scheme=convection_scheme
-                )
-                concentration = concentration_new
+                    concentration_new = solve_solute_transport_fipy(
+                        fipy_mesh, backend, concentration, dt,
+                        pressure, density, k_tensor, Parameters.viscosity,
+                        Parameters.g, Parameters.porosity,
+                        Parameters.diffusivity, Parameters.l_disp,
+                        Parameters.l_disp * Parameters.disp_ratio,
+                        bc['spec_conc_mask'], bc['specified_concentration'],
+                        Parameters, use_tensor_dispersion=True, convection_scheme=convection_scheme
+                    )
+                    concentration = concentration_new
             
             # [3.5] Calculate concentration change rate (dC/dt) for coupling
             # This is used in the pressure equation to account for density-driven flow
