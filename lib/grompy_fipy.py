@@ -578,29 +578,57 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
                 sea_surface_mask
             )
         else:
-            # If applying to specific x,y regions, don't require sea_surface_mask
-            # For vertical boundaries (xmin == xmax), use tolerance
+            # If applying to specific x,y regions (vertical or horizontal boundaries)
+            # For vertical boundaries (xmin == xmax), use tolerance to identify left/right walls
             if abs(xmax - xmin) < tol:
                 x_match = np.abs(x - xmin) <= tol
             else:
                 x_match = (x >= xmin) & (x <= xmax)
             
-            # For horizontal boundaries (ymin == ymax), use tolerance
+            # For horizontal boundaries (ymin == ymax), use tolerance to identify top/bottom
             if abs(ymax - ymin) < tol:
                 y_match = np.abs(y - ymin) <= tol
             else:
                 y_match = (y >= ymin) & (y <= ymax)
             
-            region_mask = x_match & y_match & surface_mask
+            # CRITICAL FIX: Don't require surface_mask for vertical boundaries (x fixed)
+            # Vertical boundaries (like seawater inlet at x=0) need to apply to full depth
+            # Only apply surface_mask for horizontal boundaries (y fixed)
+            is_vertical_boundary = abs(xmax - xmin) < tol
+            if is_vertical_boundary:
+                # Vertical boundary: apply to full y-range without surface requirement
+                region_mask = x_match & y_match
+            else:
+                # Horizontal boundary: apply to surface only
+                region_mask = x_match & y_match & surface_mask
         
         # Apply boundary condition for this region
         specified_concentration[region_mask] = conc_val
         spec_conc_mask_regional[region_mask] = True  # Mark cells that received BC
+        
+        # Debug: Print how many cells received this BC
+        n_cells_bc = np.sum(region_mask)
+        if n_cells_bc > 0:
+            print(f"  Region {i_region}: C={conc_val:.5f}, x=[{xmin:.4f}, {xmax:.4f}], "
+                  f"y=[{ymin:.4f}, {ymax:.4f}], {n_cells_bc} cells")
     
     # Create combined mask for return value
     # NOTE: We use the broader mask here for numerical stability with FiPy penalty method
     # The penalty method works better when applied to all zero-initialized cells
     spec_conc_mask = specified_concentration > -9999
+    
+    # Debug output: Boundary condition summary
+    print("\n" + "="*70)
+    print("BOUNDARY CONDITION SUMMARY")
+    print("="*70)
+    print(f"Surface cells: {np.sum(surface_mask)}")
+    print(f"Sea surface cells: {np.sum(sea_surface_mask)}")
+    print(f"Land surface cells: {np.sum(land_surface_mask)}")
+    print(f"Pressure BC cells: {np.sum(spec_pressure_mask)}")
+    print(f"Concentration BC cells: {np.sum(spec_conc_mask_regional)}")
+    if np.sum(spec_conc_mask_regional) > 0:
+        print(f"  Concentration BC range: {specified_concentration[spec_conc_mask_regional].min():.6f} to {specified_concentration[spec_conc_mask_regional].max():.6f}")
+    print("="*70 + "\n")
     
     return {
         'surface': surface_mask,
@@ -616,7 +644,7 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
     }
 
 
-def setup_fipy_initial_conditions(mesh, cell_centers, z_surface, Parameters):
+def setup_fipy_initial_conditions(mesh, cell_centers, z_surface, Parameters, bc=None):
     """
     Set up initial conditions for pressure and concentration.
     
@@ -630,6 +658,8 @@ def setup_fipy_initial_conditions(mesh, cell_centers, z_surface, Parameters):
         Surface elevation at each cell
     Parameters : object
         Model parameters
+    bc : dict, optional
+        Boundary condition dictionary containing 'specified_concentration' and 'spec_conc_mask'
     
     Returns
     -------
@@ -679,6 +709,19 @@ def setup_fipy_initial_conditions(mesh, cell_centers, z_surface, Parameters):
         # Uniform fresh water
         freshwater_conc = getattr(Parameters, 'freshwater_concentration', 0.0)
         concentration = np.full(n_cells, freshwater_conc)
+    
+    # OPTION B: Apply concentration boundary conditions to initial condition
+    # This seeds salt water at inlet boundaries for faster intrusion
+    if bc is not None and 'specified_concentration' in bc and 'spec_conc_mask' in bc:
+        spec_conc_mask = bc['spec_conc_mask']
+        specified_concentration = bc['specified_concentration']
+        
+        # Apply BC values to initial concentration at specified cells
+        if np.any(spec_conc_mask):
+            concentration[spec_conc_mask] = specified_concentration[spec_conc_mask]
+            n_bc_cells = np.sum(spec_conc_mask)
+            print(f"Applied initial concentration BC to {n_bc_cells} cells")
+            print(f"  Concentration range: {concentration.min():.6f} to {concentration.max():.6f}")
     
     # Initial density
     density = calculate_fluid_density(concentration, Parameters.gamma, Parameters.rho_f_0)
@@ -1182,7 +1225,7 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
     # Set up initial conditions
     print("Setting up initial conditions")
     pressure, concentration, density = setup_fipy_initial_conditions(
-        mesh, cell_centers, bc['z_surface'], Parameters
+        mesh, cell_centers, bc['z_surface'], Parameters, bc=bc
     )
     
     # Set up permeability tensor

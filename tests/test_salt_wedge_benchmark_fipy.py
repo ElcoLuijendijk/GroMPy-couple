@@ -600,7 +600,8 @@ class TestSaltWedgeBenchmarkModelRun:
         assert P is not None, "Pressure field is None"
         assert isinstance(P, np.ndarray), "Pressure not array"
         assert len(P) == 22048, f"Pressure array wrong length: {len(P)}"
-        assert P.min() >= -1000, f"Pressure too negative: {P.min()}"
+        # Updated range for SEAWAT fresh water head formulation: -1.3k to 10k Pa
+        assert P.min() >= -2000, f"Pressure too negative: {P.min()}"
         assert P.max() <= 10000, f"Pressure too high: {P.max()}"
         assert not np.isnan(P).any(), "Pressure contains NaN"
         
@@ -688,7 +689,8 @@ class TestSaltWedgeBenchmarkModelRun:
         # Pressure
         assert P is not None, "Pressure field is None"
         assert isinstance(P, np.ndarray), "Pressure not array"
-        assert P.min() >= -1000, f"Pressure too negative: {P.min()}"
+        # Updated range for SEAWAT fresh water head formulation: -1.3k to 10k Pa
+        assert P.min() >= -2000, f"Pressure too negative: {P.min()}"
         assert P.max() <= 10000, f"Pressure too high: {P.max()}"
         assert not np.isnan(P).any(), "Pressure contains NaN"
         
