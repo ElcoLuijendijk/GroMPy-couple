@@ -684,15 +684,20 @@ def solve_transient_pressure_fipy(
     recharge_flux, recharge_mask,
     spec_pressure_mask, specified_pressure,
     Parameters, dt, pressure_old, porosity=None, gamma=None,
-    concentration_old=None
+    concentration_old=None, dC_dt_field=None
 ):
     """
-    Solve transient pressure equation using FiPy with time discretization.
+    Solve transient pressure equation using FiPy with time discretization and coupling.
     
-    The equation solved includes a time discretization term:
-    S_s * (P - P_old) / dt - div(k/mu * (grad(P) - rho*g)) = Q
+    The equation solved includes:
+    - Time discretization term: S_s * (P - P_old) / dt
+    - Coupling term (NEW!): -dt * γ * φ * dC/dt
+    - Diffusion term: -div(k/mu * grad(P))
+    - Source term: Q (recharge)
     
-    This is a semi-implicit discretization that enables coupling with transport.
+    This semi-implicit discretization enables bidirectional coupling:
+    - Density changes (from concentration) affect pressure
+    - Pressure changes affect velocity, which transports salt
     
     Parameters
     ----------
@@ -728,6 +733,10 @@ def solve_transient_pressure_fipy(
         Density expansion coefficient (needed for coupling term)
     concentration_old : np.ndarray, optional
         Concentration from previous iteration (for density-pressure coupling)
+    dC_dt_field : np.ndarray, optional
+        Rate of concentration change (dC/dt). When provided, this enables
+        the coupling term: -dt*γ*φ*dC/dt in the pressure equation coefficient.
+        This represents the effect of compressibility due to changing salt content.
     
     Returns
     -------
@@ -750,10 +759,27 @@ def solve_transient_pressure_fipy(
     # Storage coefficient from parameters
     S_s = Parameters.specific_storage
     
+    # COUPLING TERM (NEW for Phase 2!)
+    # When concentration changes, density changes, which affects storage
+    # The coupling coefficient modifies S_s: S_s_eff = S_s - dt*γ*φ*dC/dt
+    if dC_dt_field is not None and gamma is not None and porosity is not None:
+        # Create coupling field: -γ*φ*dC/dt
+        coupling_field = -gamma * porosity * dC_dt_field
+        # Effective storage coefficient = S_s + coupling_field
+        S_s_effective = S_s + coupling_field
+        # Clamp negative values to avoid instability
+        S_s_effective = np.maximum(S_s_effective, 1.0e-8)
+    else:
+        # No coupling - just use standard storage
+        S_s_effective = S_s * np.ones_like(pressure_old)
+    
     # Recharge term - convert from flux to volumetric source
     q_source = CellVariable(mesh=fipy_mesh, value=0.0)
     if np.any(recharge_mask):
         q_source.setValue(recharge_flux, where=recharge_mask)
+    
+    # Create storage coefficient as CellVariable for spatially varying coupling
+    S_s_cell = CellVariable(mesh=fipy_mesh, value=S_s_effective)
     
     # Apply Dirichlet boundary conditions using penalty method
     if np.any(spec_pressure_mask):
@@ -764,22 +790,28 @@ def solve_transient_pressure_fipy(
         constraint_source = CellVariable(mesh=fipy_mesh, value=0.0)
         constraint_source.setValue(-large_value * specified_pressure, where=spec_pressure_mask)
         
-        # Build transient equation with penalty method:
-        # S_s / dt * (P - P_old) - div(k/mu * grad(P)) - lambda*P = -lambda*P_target + Q
-        eq = (TransientTerm(coeff=S_s / dt) +
+        # Build transient equation with coupling term and penalty method:
+        # (S_s + coupling_term) / dt * (P - P_old) - div(k/mu * grad(P)) - lambda*P = -lambda*P_target + Q
+        eq = (TransientTerm(coeff=S_s_cell / dt) +
               DiffusionTerm(coeff=diffusion_coeff) +
               ImplicitSourceTerm(coeff=constraint_coeff)
               == q_source + constraint_source)
     else:
         # Build transient equation without penalty:
-        # S_s / dt * (P - P_old) - div(k/mu * grad(P)) = Q
-        eq = (TransientTerm(coeff=S_s / dt) +
+        # (S_s + coupling_term) / dt * (P - P_old) - div(k/mu * grad(P)) = Q
+        eq = (TransientTerm(coeff=S_s_cell / dt) +
               DiffusionTerm(coeff=diffusion_coeff)
               == q_source)
     
     # Set initial value for transient term
     # The TransientTerm needs the old value to compute the time derivative
     eq.solve(var=pressure, dt=dt)
+    
+    # Debug output: show coupling term magnitude if present
+    if dC_dt_field is not None:
+        coupling_max = np.max(np.abs(coupling_field)) if isinstance(coupling_field, np.ndarray) else 0.0
+        if coupling_max > 0:
+            print(f"    Pressure coupling: max|γ*φ*dC/dt| = {coupling_max:.2e}")
     
     return np.array(pressure.value)
 
@@ -1159,7 +1191,11 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
                 )
                 concentration = concentration_new
             
-            # [4] Solve transient pressure with updated density
+            # [3.5] Calculate concentration change rate (dC/dt) for coupling
+            # This is used in the pressure equation to account for density-driven flow
+            dC_dt_field = (concentration - concentration_start_ts) / dt
+            
+            # [4] Solve transient pressure with updated density and coupling
             # (This is where coupling happens - density changes affect pressure)
             pressure_new = solve_transient_pressure_fipy(
                 fipy_mesh, backend, k_tensor, Parameters.viscosity,
@@ -1169,7 +1205,8 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
                 Parameters, dt, pressure_start_ts,
                 porosity=Parameters.porosity,
                 gamma=Parameters.gamma,
-                concentration_old=concentration_start_ts
+                concentration_old=concentration_start_ts,
+                dC_dt_field=dC_dt_field
             )
             
             # [5] Check convergence
