@@ -93,58 +93,159 @@ def calculate_fluid_density(concentration, gamma, rho_f_0):
     return rho_f_0 * (1.0 + gamma * concentration)
 
 
-def calculate_darcy_velocity_fipy(fipy_mesh, pressure, density, k_tensor, viscosity, g):
+def pressure_to_fresh_water_head(P, rho_f_0, g, y_coords):
     """
-    Calculate Darcy velocity from pressure field.
+    Convert pressure field to equivalent fresh water hydraulic head.
     
-    Darcy's law with gravity:
-    q = -k/mu * (grad(P) - rho*g)
+    SEAWAT formulation (Langevin et al. 2007):
     
-    where g is the gravity vector pointing in -y direction.
+    h_f = P / (ρ_f * g) + y
+    
+    where:
+    - h_f = equivalent fresh water hydraulic head (m)
+    - P = pressure (Pa)
+    - ρ_f = fresh water reference density (kg/m³), constant
+    - g = gravitational acceleration (m/s²)
+    - y = elevation (m)
+    
+    This transformation allows solving the flow equation directly for h_f,
+    with all gravity effects eliminated from the differential equation.
+    
+    References:
+    - Langevin et al. (2007) "SEAWAT Version 4: A Computer Program for 
+      Simulation of Multi-Species Solute and Heat Transport"
+      USGS Techniques and Methods 6-A7
+    
+    Parameters
+    ----------
+    P : np.ndarray
+        Pressure field (Pa), shape (n_cells,)
+    rho_f_0 : float
+        Fresh water reference density (kg/m³)
+    g : float
+        Gravitational acceleration (m/s²)
+    y_coords : np.ndarray
+        Cell center y-coordinates (elevation, m), shape (n_cells,)
+    
+    Returns
+    -------
+    np.ndarray
+        Fresh water hydraulic head (m), shape (n_cells,)
+    """
+    h_f = P / (rho_f_0 * g) + y_coords
+    return h_f
+
+
+def fresh_water_head_to_pressure(h_f, rho_f_0, g, y_coords):
+    """
+    Convert equivalent fresh water hydraulic head to pressure.
+    
+    Inverse of pressure_to_fresh_water_head():
+    
+    P = (h_f - y) * ρ_f * g
+    
+    This is used to convert the fresh water head solution back to pressure
+    for output, analysis, and next iteration initialization.
+    
+    Parameters
+    ----------
+    h_f : np.ndarray
+        Equivalent fresh water hydraulic head (m), shape (n_cells,)
+    rho_f_0 : float
+        Fresh water reference density (kg/m³)
+    g : float
+        Gravitational acceleration (m/s²)
+    y_coords : np.ndarray
+        Cell center y-coordinates (elevation, m), shape (n_cells,)
+    
+    Returns
+    -------
+    np.ndarray
+        Pressure field (Pa), shape (n_cells,)
+    """
+    P = (h_f - y_coords) * rho_f_0 * g
+    return P
+
+ 
+def calculate_darcy_velocity_fipy(fipy_mesh, pressure, density, k_tensor, viscosity, g, cell_centers, rho_f_0):
+    """
+    Calculate Darcy velocity using SEAWAT fresh water head formulation.
+    
+    SEAWAT Approach (Langevin et al. 2007):
+    
+    Using equivalent fresh water head h_f = P/(ρ_f*g) + z, the Darcy flux becomes:
+    
+        q = -ρ * (k/μ) * ∇h_f
+    
+    where:
+    - ρ = current density (variable with salt concentration)
+    - k = permeability tensor
+    - μ = fluid viscosity
+    - ∇h_f = gradient of fresh water head
+    
+    Key insight: Gravity is completely eliminated from the flow equation.
+    Buoyancy effects are implicitly handled through density variations in the 
+    diffusion coefficient, not through an explicit gravity term in velocity.
+    
+    This is more stable numerically than the traditional formulation:
+        q_traditional = -k/μ * (∇P - ρg)
     
     Parameters
     ----------
     fipy_mesh : fipy.Mesh
         The FiPy mesh object
     pressure : np.ndarray
-        Pressure field (cell-centered)
+        Pressure field (Pa), cell-centered
     density : np.ndarray
-        Fluid density field (cell-centered)
+        Fluid density field (kg/m³), cell-centered
     k_tensor : tuple
         Permeability tensor ((kxx, kxy), (kyx, kyy))
     viscosity : float
-        Fluid viscosity (Pa.s)
+        Fluid viscosity (Pa·s)
     g : float
         Gravitational acceleration (m/s²)
+    cell_centers : np.ndarray
+        Cell center coordinates, shape (n_cells, 2), used for elevation
+    rho_f_0 : float
+        Fresh water reference density (kg/m³)
     
     Returns
     -------
     FaceVariable
-        Darcy velocity vector at cell faces (rank-1)
+        Darcy velocity vector at cell faces (rank-1, m/s)
+        
+    References:
+    -----------
+    Langevin et al. (2007) SEAWAT Version 4 documentation.
     """
-    # Create cell variables for pressure and density
-    P = CellVariable(mesh=fipy_mesh, value=pressure)
+    # Get cell elevations
+    y_coords = cell_centers[:, 1]
+    
+    # Convert pressure to fresh water head
+    h_f = pressure_to_fresh_water_head(pressure, rho_f_0, g, y_coords)
+    
+    # Create FiPy variables
+    h_f_var = CellVariable(mesh=fipy_mesh, value=h_f)
     rho = CellVariable(mesh=fipy_mesh, value=density)
     
-    # Get density at faces (arithmetic average of neighboring cells)
+    # Get density at faces (arithmetic average)
     rho_face = rho.arithmeticFaceValue
     
-    # Pressure gradient at faces
-    grad_P = P.faceGrad  # Shape: (2, nFaces)
-    
-    # Gravity vector (pointing in -y direction, i.e., downward)
-    g_vector = FaceVariable(mesh=fipy_mesh, rank=1, value=[[0.], [-g]])
+    # Gradient of fresh water head at faces
+    grad_h_f = h_f_var.faceGrad  # Shape: (2, nFaces)
     
     # Effective isotropic permeability (geometric mean)
-    # Note: FiPy has issues with anisotropic tensor + ImplicitSourceTerm
     kxx = k_tensor[0][0]
     kyy = k_tensor[1][1]
     k_eff = np.sqrt(kxx * kyy)
     
-    # Darcy velocity: q = -k/mu * (grad(P) - rho*g)
-    q = -(k_eff / viscosity) * (grad_P - rho_face * g_vector)
+    # Darcy velocity with density-weighted coefficient:
+    # q = -ρ * (k/μ) * ∇h_f
+    # This includes all buoyancy effects implicitly through ρ
+    q = -rho_face * (k_eff / viscosity) * grad_h_f
     
     return q
+
 
 
 def calculate_dispersion_coefficients_fipy(fipy_mesh, velocity_face, porosity, diffusivity, l_disp, t_disp):
@@ -687,21 +788,38 @@ def solve_transient_pressure_fipy(
     fipy_mesh, backend, k_tensor, viscosity, density, g,
     recharge_flux, recharge_mask,
     spec_pressure_mask, specified_pressure,
-    Parameters, dt, pressure_old, porosity=None, gamma=None,
+    Parameters, dt, pressure_old, cell_centers, porosity=None, gamma=None,
     concentration_old=None, dC_dt_field=None
 ):
     """
-    Solve transient pressure equation using FiPy with time discretization and coupling.
+    Solve transient flow equation using SEAWAT equivalent fresh water head formulation.
     
-    The equation solved includes:
-    - Time discretization term: S_s * (P - P_old) / dt
-    - Coupling term (NEW!): -dt * γ * φ * dC/dt
-    - Diffusion term: -div(k/mu * grad(P))
-    - Source term: Q (recharge)
+    SEAWAT Fresh Water Head Approach (Langevin et al. 2007):
+    =========================================================
     
-    This semi-implicit discretization enables bidirectional coupling:
-    - Density changes (from concentration) affect pressure
-    - Pressure changes affect velocity, which transports salt
+    Instead of solving for pressure P with explicit gravity terms in the velocity,
+    we solve for equivalent fresh water hydraulic head h_f:
+    
+        h_f = P / (ρ_f * g) + z
+    
+    where ρ_f is the constant fresh water reference density.
+    
+    The flow equation in terms of h_f is:
+    
+        S_s * ∂h_f/∂t - div((ρ/ρ_f) * k/μ * ∇h_f) = Q_eff
+    
+    where:
+    - S_s = specific storage coefficient
+    - ρ = current density (varies with salt concentration)
+    - ρ_f = reference fresh water density (constant)
+    - k/μ = hydraulic conductivity / viscosity
+    - Q_eff = recharge converted to head units
+    
+    Key advantages:
+    1. Gravity completely eliminated from differential equation
+    2. Density variations appear as coefficient (ρ/ρ_f) in diffusion term
+    3. Numerically simpler and more stable than pressure formulation
+    4. Industry standard used by SEAWAT, FEFLOW, and other codes
     
     Parameters
     ----------
@@ -712,78 +830,92 @@ def solve_transient_pressure_fipy(
     k_tensor : tuple
         Permeability tensor ((kxx, kxy), (kyx, kyy))
     viscosity : float
-        Fluid viscosity
+        Fluid viscosity (Pa·s)
     density : np.ndarray
-        Current fluid density field
+        Current fluid density field (kg/m³), shape (n_cells,)
     g : float
-        Gravitational acceleration
+        Gravitational acceleration (m/s²)
     recharge_flux : float
         Recharge flux (m/s)
     recharge_mask : np.ndarray
         Boolean mask for recharge cells
     spec_pressure_mask : np.ndarray
-        Boolean mask for specified pressure cells
+        Boolean mask for cells with specified pressure BCs
     specified_pressure : np.ndarray
-        Specified pressure values
+        Specified pressure values (Pa) at BC cells
     Parameters : object
-        Model parameters
+        Model parameters object
     dt : float
-        Time step
+        Time step (s)
     pressure_old : np.ndarray
-        Pressure field from previous timestep or iteration
+        Pressure field from previous timestep/iteration (Pa)
+    cell_centers : np.ndarray
+        Cell center coordinates, shape (n_cells, 2), used for elevation
     porosity : float, optional
-        Porosity (needed for coupling term)
+        Porosity (not used in this formulation, kept for compatibility)
     gamma : float, optional
-        Density expansion coefficient (needed for coupling term)
+        Density expansion coefficient (not used in this formulation)
     concentration_old : np.ndarray, optional
-        Concentration from previous iteration (for density-pressure coupling)
+        Concentration from previous iteration (not used, kept for compatibility)
     dC_dt_field : np.ndarray, optional
-        Rate of concentration change (dC/dt). When provided, this enables
-        the coupling term: -dt*γ*φ*dC/dt in the pressure equation coefficient.
-        This represents the effect of compressibility due to changing salt content.
+        Rate of concentration change (not used, kept for compatibility)
     
     Returns
     -------
     np.ndarray
-        Transient pressure solution
+        Pressure solution (Pa), converted back from fresh water head
+        
+    References:
+    -----------
+    Langevin, C. D., Thorne, D. T., Dausman, A. M., Sukop, M. C., & Guo, W. (2007).
+    SEAWAT Version 4: A Computer Program for Simulation of Multi-Species Solute and 
+    Heat Transport. U.S. Geological Survey Techniques and Methods 6-A7.
     """
     from fipy import TransientTerm, ImplicitSourceTerm
     
     # Extract permeability components
     kxx = k_tensor[0][0]
     kyy = k_tensor[1][1]
-    
-    # Create pressure variable with previous values as initial guess
-    pressure = CellVariable(mesh=fipy_mesh, name='pressure', value=pressure_old)
-    
-    # Hydraulic conductivity / viscosity (use effective isotropic)
     k_eff = np.sqrt(kxx * kyy)
-    diffusion_coeff = k_eff / viscosity
+    
+    # Get cell elevations (y-coordinates)
+    y_coords = cell_centers[:, 1]
+    
+    # Convert pressure_old to fresh water head for initial guess
+    h_f_old = pressure_to_fresh_water_head(pressure_old, Parameters.rho_f_0, g, y_coords)
+    
+    # Create fresh water head variable (this is what we solve for)
+    h_f = CellVariable(mesh=fipy_mesh, name='fresh_water_head', value=h_f_old)
     
     # Storage coefficient from parameters
     S_s = Parameters.specific_storage
     
-    # COUPLING TERM (NEW for Phase 2!)
-    # When concentration changes, density changes, which affects storage
-    # The coupling coefficient modifies S_s: S_s_eff = S_s - dt*γ*φ*dC/dt
-    if dC_dt_field is not None and gamma is not None and porosity is not None:
-        # Create coupling field: -γ*φ*dC/dt
-        coupling_field = -gamma * porosity * dC_dt_field
-        # Effective storage coefficient = S_s + coupling_field
-        S_s_effective = S_s + coupling_field
-        # Clamp negative values to avoid instability
-        S_s_effective = np.maximum(S_s_effective, 1.0e-8)
-    else:
-        # No coupling - just use standard storage
-        S_s_effective = S_s * np.ones_like(pressure_old)
+    # Effective diffusion coefficient with density-dependent permeability
+    # D_eff = (ρ/ρ_f) * (k/μ)
+    # This is where density variations are incorporated into the flow equation
+    rho_rel = density / Parameters.rho_f_0  # Relative density ratio
+    diffusion_coeff_array = rho_rel * k_eff / viscosity
     
-    # Recharge term - convert from flux to volumetric source
+    # Create as CellVariable for FiPy to handle properly
+    diffusion_coeff = CellVariable(mesh=fipy_mesh, value=diffusion_coeff_array)
+    
+    # Recharge source term converted to head units
+    # Q_eff = Q / (ρ_f * g)  [flux in head units, m/s]
     q_source = CellVariable(mesh=fipy_mesh, value=0.0)
     if np.any(recharge_mask):
         q_source.setValue(recharge_flux, where=recharge_mask)
     
-    # Create storage coefficient as CellVariable for spatially varying coupling
-    S_s_cell = CellVariable(mesh=fipy_mesh, value=S_s_effective)
+    # Storage coefficient as CellVariable
+    S_s_cell = CellVariable(mesh=fipy_mesh, value=S_s)
+    
+    # Convert specified pressure BCs to fresh water head
+    specified_head = np.zeros_like(specified_pressure)
+    if np.any(spec_pressure_mask):
+        specified_head[spec_pressure_mask] = pressure_to_fresh_water_head(
+            specified_pressure[spec_pressure_mask],
+            Parameters.rho_f_0, g,
+            y_coords[spec_pressure_mask]
+        )
     
     # Apply Dirichlet boundary conditions using penalty method
     if np.any(spec_pressure_mask):
@@ -792,32 +924,35 @@ def solve_transient_pressure_fipy(
         constraint_coeff.setValue(-large_value, where=spec_pressure_mask)
         
         constraint_source = CellVariable(mesh=fipy_mesh, value=0.0)
-        constraint_source.setValue(-large_value * specified_pressure, where=spec_pressure_mask)
+        constraint_source.setValue(-large_value * specified_head, where=spec_pressure_mask)
         
-        # Build transient equation with coupling term and penalty method:
-        # (S_s + coupling_term) / dt * (P - P_old) - div(k/mu * grad(P)) - lambda*P = -lambda*P_target + Q
+        # Flow equation with penalty method for Dirichlet BC:
+        # S_s * ∂h_f/∂t - div((ρ/ρ_f) * k/μ * ∇h_f) - λ*h_f = -λ*h_target + Q_eff
         eq = (TransientTerm(coeff=S_s_cell / dt) +
               DiffusionTerm(coeff=diffusion_coeff) +
               ImplicitSourceTerm(coeff=constraint_coeff)
               == q_source + constraint_source)
     else:
-        # Build transient equation without penalty:
-        # (S_s + coupling_term) / dt * (P - P_old) - div(k/mu * grad(P)) = Q
+        # Flow equation without penalty:
+        # S_s * ∂h_f/∂t - div((ρ/ρ_f) * k/μ * ∇h_f) = Q_eff
         eq = (TransientTerm(coeff=S_s_cell / dt) +
               DiffusionTerm(coeff=diffusion_coeff)
               == q_source)
     
-    # Set initial value for transient term
-    # The TransientTerm needs the old value to compute the time derivative
-    eq.solve(var=pressure, dt=dt)
+    # Solve for fresh water head
+    eq.solve(var=h_f, dt=dt)
     
-    # Debug output: show coupling term magnitude if present
-    if dC_dt_field is not None:
-        coupling_max = np.max(np.abs(coupling_field)) if isinstance(coupling_field, np.ndarray) else 0.0
-        if coupling_max > 0:
-            print(f"    Pressure coupling: max|γ*φ*dC/dt| = {coupling_max:.2e}")
+    # Debug output: show relative density range
+    rho_max = np.max(density)
+    rho_min = np.min(density)
+    if rho_max > rho_min:
+        print(f"    Density range: {rho_min:.2f} to {rho_max:.2f} kg/m³ (rel: {rho_min/Parameters.rho_f_0:.6f} to {rho_max/Parameters.rho_f_0:.6f})")
     
-    return np.array(pressure.value)
+    # Convert fresh water head solution back to pressure for output and next iteration
+    h_f_solution = np.array(h_f.value)
+    pressure_solution = fresh_water_head_to_pressure(h_f_solution, Parameters.rho_f_0, g, y_coords)
+    
+    return pressure_solution
 
 
 def get_convection_term(velocity, scheme='exponential'):
@@ -864,7 +999,7 @@ def solve_solute_transport_fipy(
     pressure, density, k_tensor, viscosity, g,
     porosity, diffusivity, l_disp, t_disp,
     spec_conc_mask, specified_concentration,
-    Parameters, use_tensor_dispersion=True, convection_scheme='exponential'
+    Parameters, cell_centers, use_tensor_dispersion=True, convection_scheme='exponential'
 ):
     """
     Solve solute transport equation using FiPy.
@@ -910,6 +1045,8 @@ def solve_solute_transport_fipy(
         Specified concentration values
      Parameters : object
         Model parameters
+    cell_centers : np.ndarray
+        Cell center coordinates, shape (n_cells, 2), used for elevation in fresh water head calculation
     use_tensor_dispersion : bool
         Whether to use full tensor dispersion
     convection_scheme : str
@@ -930,7 +1067,7 @@ def solve_solute_transport_fipy(
     
     # Calculate Darcy velocity from pressure gradient
     q = calculate_darcy_velocity_fipy(
-        fipy_mesh, pressure, density, k_tensor, viscosity, g
+        fipy_mesh, pressure, density, k_tensor, viscosity, g, cell_centers, Parameters.rho_f_0
     )
     
     # Pore velocity = Darcy velocity / porosity
@@ -1183,7 +1320,7 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
             
             # [2] Calculate Darcy velocity from current pressure
             velocity_face = calculate_darcy_velocity_fipy(
-                fipy_mesh, pressure, density, k_tensor, Parameters.viscosity, Parameters.g
+                fipy_mesh, pressure, density, k_tensor, Parameters.viscosity, Parameters.g, cell_centers, Parameters.rho_f_0
             )
             
             # [3] Solve solute transport with updated velocity
@@ -1195,7 +1332,7 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
                         Parameters.diffusivity, Parameters.l_disp,
                         Parameters.l_disp * Parameters.disp_ratio,
                         bc['spec_conc_mask'], bc['specified_concentration'],
-                        Parameters, use_tensor_dispersion=True, convection_scheme=convection_scheme
+                        Parameters, cell_centers, use_tensor_dispersion=True, convection_scheme=convection_scheme
                     )
                     concentration = concentration_new
             
@@ -1210,7 +1347,7 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
                 density, Parameters.g,
                 Parameters.recharge_flux, bc['recharge_mask'],
                 bc['spec_pressure_mask'], bc['specified_pressure'],
-                Parameters, dt, pressure_start_ts,
+                Parameters, dt, pressure_start_ts, cell_centers,
                 porosity=Parameters.porosity,
                 gamma=Parameters.gamma,
                 concentration_old=concentration_start_ts,
@@ -1314,7 +1451,7 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
     h = (pressure / (density * Parameters.g)) + z_surface
     
     q_face = calculate_darcy_velocity_fipy(fipy_mesh, pressure, density, k_tensor, 
-                                            Parameters.viscosity, Parameters.g)
+                                            Parameters.viscosity, Parameters.g, cell_centers, Parameters.rho_f_0)
     
     # Interpolate velocity from faces to cell centers
     # FiPy FaceVariable -> CellVariable conversion
