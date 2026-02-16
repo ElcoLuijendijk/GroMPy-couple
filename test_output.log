@@ -1,0 +1,40 @@
+Warning: Appending zeros to replace the missing physical tag data.
+Warning: Appending zeros to replace the missing geometrical tag data.
+Traceback (most recent call last):
+  File "/Users/elco/published_code/GroMPy-couple/test_quick_fipy.py", line 48, in <module>
+    print(f'   Concentration min: {conc.min():.6f}')
+                                   ^^^^^^^^
+AttributeError: 'FiPyMesh' object has no attribute 'min'
+============================================================
+QUICK TEST: FiPy Salt Wedge Model with Fixes
+============================================================
+
+1. Creating mesh...
+Rectangular mesh saved to: model_output/salt_wedge_benchmark/_19_sw_quick_test.msh
+   Mesh created: model_output/salt_wedge_benchmark/_19_sw_quick_test.msh
+
+2. Running model for 2.0 seconds...
+   (This may take 1-5 minutes)
+============================================================
+Running coupled flow model with FiPy backend
+============================================================
+Loading mesh from: model_output/salt_wedge_benchmark/_19_sw_quick_test.msh
+
+Mesh loaded: 44096 cells
+Setting up boundary conditions
+Setting up initial conditions
+
+Starting time stepping...
+------------------------------------------------------------
+Running initial steady-state pressure solve...
+Steady-state pressure solve complete
+Pressure range: 0.00 to 0.00 Pa
+Concentration range after BC enforcement: 0.000000 to 0.000000
+Timestep 8: t = 0 yrs, 0 days, P: [0.0, 0.0] Pa, C: [0.0000, 0.0000] kg/kg
+------------------------------------------------------------
+Simulation complete: 8 timesteps, runtime = 0 yrs, 0 days
+
+3. Test Result:
+
+✗ ERROR: 'FiPyMesh' object has no attribute 'min'
+============================================================

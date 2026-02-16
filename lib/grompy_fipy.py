@@ -679,6 +679,110 @@ def solve_steady_state_pressure_fipy(
     return np.array(pressure.value)
 
 
+def solve_transient_pressure_fipy(
+    fipy_mesh, backend, k_tensor, viscosity, density, g,
+    recharge_flux, recharge_mask,
+    spec_pressure_mask, specified_pressure,
+    Parameters, dt, pressure_old, porosity=None, gamma=None,
+    concentration_old=None
+):
+    """
+    Solve transient pressure equation using FiPy with time discretization.
+    
+    The equation solved includes a time discretization term:
+    S_s * (P - P_old) / dt - div(k/mu * (grad(P) - rho*g)) = Q
+    
+    This is a semi-implicit discretization that enables coupling with transport.
+    
+    Parameters
+    ----------
+    fipy_mesh : fipy.Mesh
+        The FiPy mesh object
+    backend : FiPyBackend
+        The backend instance
+    k_tensor : tuple
+        Permeability tensor ((kxx, kxy), (kyx, kyy))
+    viscosity : float
+        Fluid viscosity
+    density : np.ndarray
+        Current fluid density field
+    g : float
+        Gravitational acceleration
+    recharge_flux : float
+        Recharge flux (m/s)
+    recharge_mask : np.ndarray
+        Boolean mask for recharge cells
+    spec_pressure_mask : np.ndarray
+        Boolean mask for specified pressure cells
+    specified_pressure : np.ndarray
+        Specified pressure values
+    Parameters : object
+        Model parameters
+    dt : float
+        Time step
+    pressure_old : np.ndarray
+        Pressure field from previous timestep or iteration
+    porosity : float, optional
+        Porosity (needed for coupling term)
+    gamma : float, optional
+        Density expansion coefficient (needed for coupling term)
+    concentration_old : np.ndarray, optional
+        Concentration from previous iteration (for density-pressure coupling)
+    
+    Returns
+    -------
+    np.ndarray
+        Transient pressure solution
+    """
+    from fipy import TransientTerm, ImplicitSourceTerm
+    
+    # Extract permeability components
+    kxx = k_tensor[0][0]
+    kyy = k_tensor[1][1]
+    
+    # Create pressure variable with previous values as initial guess
+    pressure = CellVariable(mesh=fipy_mesh, name='pressure', value=pressure_old)
+    
+    # Hydraulic conductivity / viscosity (use effective isotropic)
+    k_eff = np.sqrt(kxx * kyy)
+    diffusion_coeff = k_eff / viscosity
+    
+    # Storage coefficient from parameters
+    S_s = Parameters.specific_storage
+    
+    # Recharge term - convert from flux to volumetric source
+    q_source = CellVariable(mesh=fipy_mesh, value=0.0)
+    if np.any(recharge_mask):
+        q_source.setValue(recharge_flux, where=recharge_mask)
+    
+    # Apply Dirichlet boundary conditions using penalty method
+    if np.any(spec_pressure_mask):
+        large_value = 1e10
+        constraint_coeff = CellVariable(mesh=fipy_mesh, value=0.0)
+        constraint_coeff.setValue(-large_value, where=spec_pressure_mask)
+        
+        constraint_source = CellVariable(mesh=fipy_mesh, value=0.0)
+        constraint_source.setValue(-large_value * specified_pressure, where=spec_pressure_mask)
+        
+        # Build transient equation with penalty method:
+        # S_s / dt * (P - P_old) - div(k/mu * grad(P)) - lambda*P = -lambda*P_target + Q
+        eq = (TransientTerm(coeff=S_s / dt) +
+              DiffusionTerm(coeff=diffusion_coeff) +
+              ImplicitSourceTerm(coeff=constraint_coeff)
+              == q_source + constraint_source)
+    else:
+        # Build transient equation without penalty:
+        # S_s / dt * (P - P_old) - div(k/mu * grad(P)) = Q
+        eq = (TransientTerm(coeff=S_s / dt) +
+              DiffusionTerm(coeff=diffusion_coeff)
+              == q_source)
+    
+    # Set initial value for transient term
+    # The TransientTerm needs the old value to compute the time derivative
+    eq.solve(var=pressure, dt=dt)
+    
+    return np.array(pressure.value)
+
 
 def get_convection_term(velocity, scheme='exponential'):
     """
@@ -1017,31 +1121,74 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
     # Transient simulation
     while runtime < total_time and runtime < max_runtime and timestep < max_timesteps:
         
-        # Update fluid density from concentration
-        density = calculate_fluid_density(
-            concentration, Parameters.gamma, Parameters.rho_f_0
-        )
+        # Save state at start of timestep for convergence checking
+        concentration_start_ts = concentration.copy()
+        pressure_start_ts = pressure.copy()
         
-        # Solve pressure equation
-        # (simplified - in full implementation would iterate between pressure and transport)
+        # Get convergence parameters
+        max_coupled_iterations = Parameters.max_iterations if hasattr(Parameters, 'max_iterations') else 20
+        pressure_tol = Parameters.pressure_convergence_criterion if hasattr(Parameters, 'pressure_convergence_criterion') else 1.0e-5
+        concentration_tol = Parameters.concentration_convergence_criterion if hasattr(Parameters, 'concentration_convergence_criterion') else 1.0e-5
         
-        # Solve solute transport
-        if ModelOptions.solute_transport:
-            concentration_new = solve_solute_transport_fipy(
-                fipy_mesh, backend, concentration, dt,
-                pressure, density, k_tensor, Parameters.viscosity,
-                Parameters.g, Parameters.porosity,
-                Parameters.diffusivity, Parameters.l_disp,
-                Parameters.l_disp * Parameters.disp_ratio,
-                bc['spec_conc_mask'], bc['specified_concentration'],
-                Parameters, use_tensor_dispersion=True, convection_scheme=convection_scheme
+        # COUPLED ITERATION LOOP (NEW!)
+        coupled_converged = False
+        coupled_iter = 0
+        print(f"    Starting coupled iterations (max={max_coupled_iterations})...")
+        for coupled_iter in range(max_coupled_iterations):
+            
+            # [1] Update fluid density from current concentration
+            density = calculate_fluid_density(
+                concentration, Parameters.gamma, Parameters.rho_f_0
             )
             
-            # Check for convergence / steady state
-            conc_change = np.max(np.abs(concentration_new - concentration))
-            concentration = concentration_new
-        else:
-            conc_change = 0
+            # [2] Calculate Darcy velocity from current pressure
+            velocity_face = calculate_darcy_velocity_fipy(
+                fipy_mesh, pressure, density, k_tensor, Parameters.viscosity, Parameters.g
+            )
+            
+            # [3] Solve solute transport with updated velocity
+            if ModelOptions.solute_transport:
+                concentration_new = solve_solute_transport_fipy(
+                    fipy_mesh, backend, concentration, dt,
+                    pressure, density, k_tensor, Parameters.viscosity,
+                    Parameters.g, Parameters.porosity,
+                    Parameters.diffusivity, Parameters.l_disp,
+                    Parameters.l_disp * Parameters.disp_ratio,
+                    bc['spec_conc_mask'], bc['specified_concentration'],
+                    Parameters, use_tensor_dispersion=True, convection_scheme=convection_scheme
+                )
+                concentration = concentration_new
+            
+            # [4] Solve transient pressure with updated density
+            # (This is where coupling happens - density changes affect pressure)
+            pressure_new = solve_transient_pressure_fipy(
+                fipy_mesh, backend, k_tensor, Parameters.viscosity,
+                density, Parameters.g,
+                Parameters.recharge_flux, bc['recharge_mask'],
+                bc['spec_pressure_mask'], bc['specified_pressure'],
+                Parameters, dt, pressure_start_ts,
+                porosity=Parameters.porosity,
+                gamma=Parameters.gamma,
+                concentration_old=concentration_start_ts
+            )
+            
+            # [5] Check convergence
+            pressure_change = np.max(np.abs(pressure_new - pressure)) if len(pressure_new) > 0 else 0.0
+            conc_change = np.max(np.abs(concentration_new - concentration)) if len(concentration_new) > 0 else 0.0
+            
+            pressure = pressure_new
+            
+            if (pressure_change < pressure_tol and conc_change < concentration_tol):
+                coupled_converged = True
+                if coupled_iter > 0:
+                    print(f"  Coupled iteration {coupled_iter+1}: CONVERGED (P_Δ={pressure_change:.2e}, C_Δ={conc_change:.2e})")
+                break
+            else:
+                if coupled_iter < 3 or (coupled_iter + 1) % 5 == 0:  # Print first 3 and every 5th
+                    print(f"  Coupled iteration {coupled_iter+1}/{max_coupled_iterations}: P_Δ={pressure_change:.2e}, C_Δ={conc_change:.2e}")
+        
+        if not coupled_converged and coupled_iter == max_coupled_iterations - 1:
+            print(f"  WARNING: Coupled iterations did not converge after {max_coupled_iterations} iterations")
         
         # Track differences
         pressure_diff = np.abs(pressure - pressure_prev)
