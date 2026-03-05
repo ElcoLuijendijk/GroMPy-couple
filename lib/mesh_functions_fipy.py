@@ -120,107 +120,147 @@ def _load_mesh_from_msh(mesh_filename, topo_gradient=None, tol=1e-8):
 
 def setup_rectangular_mesh_fipy(Parameters, mesh_filename):
     """
-    Create a rectangular mesh using FiPy's Grid2D.
-    
-    This is a simple implementation that doesn't require Gmsh - it uses
-    FiPy's built-in Grid2D mesh constructor. The mesh is saved to a .msh file
-    for consistency with other mesh functions and for later loading.
-    
+    Create a rectangular mesh for the FiPy backend.
+
+    A Gmsh geometry (.geo) file is written alongside the .msh file so that
+    ``load_fipy_mesh_from_msh`` can pass it directly to ``Gmsh2D``.  When
+    running under ``mpirun -np N``, FiPy / Gmsh automatically partitions the
+    mesh into N subdomains from the .geo description without any extra work.
+
+    A triangulated .msh file is also written (via meshio) for caching and
+    visualisation.  If the .msh already exists it is reused on subsequent
+    runs (grompy.py reuses the most recent matching mesh file).
+
     Parameters
     ----------
     Parameters : object
         Model parameters object with attributes:
         - L: domain length (x direction)
-        - thickness: domain thickness (y direction)  
-        - cellsize_x: cell size in x direction
-        - cellsize_y: cell size in y direction
+        - thickness: domain thickness (y direction)
+        - cellsize / cellsize_x / cellsize_y: target cell size (m)
     mesh_filename : str
-        Path where the .msh file will be saved
-        
+        Path where the .msh file will be written.  The .geo file is written
+        to the same directory with the same stem and a .geo extension.
+
     Returns
     -------
     mesh : fipy.Grid2D
-        FiPy Grid2D mesh
+        FiPy Grid2D mesh (used by grompy.py; the actual solver re-loads via
+        load_fipy_mesh_from_msh which will prefer the .geo file).
     surface : ndarray
-        Boolean mask for surface cells (top boundary)
+        Boolean mask for surface (top-boundary) cells.
     sea_surface : None
-        Not applicable for rectangular mesh
+        Not applicable for a rectangular mesh.
     seawater : None
-        Not applicable for rectangular mesh
+        Not applicable for a rectangular mesh.
     z_surface : ndarray
-        Surface elevation (constant = thickness)
+        Surface elevation array (constant = thickness).
     """
     _check_fipy_available('setup_rectangular_mesh_fipy')
-    
-    nx = int(math.ceil(Parameters.L / Parameters.cellsize_x))
-    ny = int(math.ceil(Parameters.thickness / Parameters.cellsize_y))
-    
-    # Create FiPy Grid2D mesh
-    mesh = fipy.Grid2D(
-        dx=Parameters.L / nx,
-        dy=Parameters.thickness / ny,
-        nx=nx,
-        ny=ny
+
+    # Determine cell size (support both cellsize and cellsize_x/cellsize_y)
+    cellsize = getattr(Parameters, 'cellsize',
+                       getattr(Parameters, 'cellsize_x', None))
+    if cellsize is None:
+        raise AttributeError("Parameters must have 'cellsize' or 'cellsize_x'")
+    cellsize_y = getattr(Parameters, 'cellsize_y', cellsize)
+
+    nx = int(math.ceil(Parameters.L / cellsize))
+    ny = int(math.ceil(Parameters.thickness / cellsize_y))
+    dx = Parameters.L / nx
+    dy = Parameters.thickness / ny
+
+    # ------------------------------------------------------------------
+    # Build Gmsh geometry string for the rectangle (triangles, no Recombine)
+    # ------------------------------------------------------------------
+    # characteristic length at each corner point; Gmsh will mesh with
+    # approximately this edge length throughout the domain.
+    cl = cellsize
+    L = Parameters.L
+    H = Parameters.thickness
+
+    geo_str = (
+        "// Rectangular domain for GroMPy FiPy backend\n"
+        f"cl = {cl!r};\n"
+        f"L  = {L!r};\n"
+        f"H  = {H!r};\n"
+        "Point(1) = {0, 0, 0, cl};\n"
+        "Point(2) = {L, 0, 0, cl};\n"
+        "Point(3) = {L, H, 0, cl};\n"
+        "Point(4) = {0, H, 0, cl};\n"
+        "Line(1) = {1, 2};\n"
+        "Line(2) = {2, 3};\n"
+        "Line(3) = {3, 4};\n"
+        "Line(4) = {4, 1};\n"
+        "Line Loop(1) = {1, 2, 3, 4};\n"
+        "Plane Surface(1) = {1};\n"
+        # No 'Recombine Surface' → Gmsh produces triangles (default)
     )
-    
-    # Save mesh to file using meshio for consistency with other mesh functions
+
+    # Ensure output directory exists
+    mesh_dir = os.path.dirname(mesh_filename)
+    if mesh_dir and not os.path.exists(mesh_dir):
+        os.makedirs(mesh_dir)
+
+    # Write .geo file (used by load_fipy_mesh_from_msh → Gmsh2D)
+    geo_filename = os.path.splitext(mesh_filename)[0] + '.geo'
+    try:
+        with open(geo_filename, 'w') as fh:
+            fh.write(geo_str)
+        print(f"Gmsh geometry written to: {geo_filename}")
+    except Exception as e:
+        print(f"Warning: Failed to write .geo file: {e}")
+
+    # ------------------------------------------------------------------
+    # Also write a triangulated .msh for caching / visualisation (meshio)
+    # ------------------------------------------------------------------
+    # Create FiPy Grid2D mesh to obtain vertex/cell connectivity
+    mesh = fipy.Grid2D(dx=dx, dy=dy, nx=nx, ny=ny)
+
     try:
         import meshio
-        
-        # Ensure directory exists
-        mesh_dir = os.path.dirname(mesh_filename)
-        if mesh_dir and not os.path.exists(mesh_dir):
-            os.makedirs(mesh_dir)
-        
-        # Convert FiPy Grid2D to meshio format
-        # Extract vertex coordinates (2 x n_vertices) -> (n_vertices x 3)
-        vertex_coords = mesh.vertexCoords.T
-        points = np.column_stack([vertex_coords, np.zeros(vertex_coords.shape[0])])
-        
-        # Extract quad cell connectivity: ordered cell vertex IDs (4 x n_cells) -> (n_cells x 4)
-        quads = mesh._orderedCellVertexIDs.T
-        
-        # Convert quads to triangles: each quad [0,1,2,3] -> 2 triangles [0,1,2] and [0,2,3]
-        triangles = []
-        for quad in quads:
-            # First triangle: vertices 0, 1, 2
-            triangles.append([quad[0], quad[1], quad[2]])
-            # Second triangle: vertices 0, 2, 3
-            triangles.append([quad[0], quad[2], quad[3]])
-        triangles = np.array(triangles)
-        
-        # Create meshio mesh with triangular cells and write to ASCII gmsh22 file
-        mesh_data = meshio.Mesh(
-            points,
-            [("triangle", triangles)],  # 3-node triangular cells
-        )
-        mesh_data.write(mesh_filename, file_format="gmsh22", binary=False)
-        print(f"Rectangular mesh saved to: {mesh_filename}")
-        
+
+        vertex_coords = mesh.vertexCoords.T  # (n_vertices, 2)
+        points = np.column_stack([vertex_coords,
+                                  np.zeros(vertex_coords.shape[0])])
+
+        quads = mesh._orderedCellVertexIDs.T  # (n_quads, 4)
+
+        # Split each quad into two triangles
+        tri_a = quads[:, [0, 1, 2]]
+        tri_b = quads[:, [0, 2, 3]]
+        triangles = np.vstack([tri_a, tri_b])
+
+        mesh_data = meshio.Mesh(points, [("triangle", triangles)])
+        # Use the gmsh22 writer directly with binary=False.
+        # meshio.Mesh.write() does not reliably forward the binary=False kwarg
+        # to the underlying format writer (it defaults to binary=True), which
+        # produces a binary .msh that FiPy's Gmsh2D cannot parse.
+        from meshio.gmsh._gmsh22 import write as _write_gmsh22
+        _write_gmsh22(mesh_filename, mesh_data, binary=False)
+        print(f"Rectangular mesh (.msh) saved to: {mesh_filename}")
+
     except ImportError:
-        print("Warning: meshio not available. Mesh will not be saved to file.")
+        print("Warning: meshio not available; .msh file not written.")
     except Exception as e:
-        print(f"Warning: Failed to save mesh to file: {e}")
-    
-    # Get cell centers
+        print(f"Warning: Failed to save .msh file: {e}")
+
+    # ------------------------------------------------------------------
+    # Build masks from Grid2D cell centres
+    # ------------------------------------------------------------------
     cell_centers = mesh.cellCenters
     x_centers = np.array(cell_centers[0])
     y_centers = np.array(cell_centers[1])
-    
-    # Surface mask: cells at top of domain
-    # Cell centers are at the middle of cells, so the top row has y = thickness - dy/2
-    dy = Parameters.thickness / ny
-    tol = dy  # Use full cell height as tolerance to catch the top row
+
+    # Surface mask: top row of cells (y centre ≈ thickness - dy/2)
     z_surface_value = Parameters.thickness
-    surface = np.abs(y_centers - (z_surface_value - dy/2)) < tol / 2
-    
-    # z_surface is constant for rectangular mesh
+    surface = np.abs(y_centers - (z_surface_value - dy / 2)) < dy / 2
+
     z_surface = np.ones_like(x_centers) * z_surface_value
-    
-    # No sea surface or seawater for simple rectangular mesh
+
     sea_surface = None
     seawater = None
-    
+
     return mesh, surface, sea_surface, seawater, z_surface
 
 

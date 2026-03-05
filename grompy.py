@@ -633,6 +633,26 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
 def main():
     year = 365.25 * 24 * 60.0 * 60.0
 
+    # ------------------------------------------------------------------
+    # MPI / PETSc startup check
+    # When launched via "mpirun -np N python grompy.py", FiPy uses PETSc
+    # for distributed-memory parallel linear solves.  OMP_NUM_THREADS must
+    # be set to 1 in that case, otherwise OpenMP threading inside each MPI
+    # rank causes severe performance degradation.
+    # This block is a no-op when FiPy / petsc4py is not installed, or when
+    # running with a single process (no mpirun).
+    # ------------------------------------------------------------------
+    try:
+        from fipy import parallel as _fipy_parallel
+        if _fipy_parallel.Nproc > 1:
+            import os as _os
+            if _os.environ.get('OMP_NUM_THREADS') is None:
+                _os.environ['OMP_NUM_THREADS'] = '1'
+                print('Note: OMP_NUM_THREADS not set; defaulting to 1 for MPI run '
+                      f'({_fipy_parallel.Nproc} ranks)')
+    except (ImportError, AttributeError):
+        pass
+
     #################################
     # import model scenario settings
     #################################

@@ -444,6 +444,25 @@ def run_model_scenario_and_analyze_results(output, Parameters, ModelOptions,
 
 
 def main():
+    # ------------------------------------------------------------------
+    # Guard: grompy_parallel.py uses Python multiprocessing, which is
+    # incompatible with MPI.  Mixing mpirun + multiprocessing.Process
+    # causes undefined behaviour (rank duplication, deadlocks).
+    # If the user accidentally runs "mpirun -np N python grompy_parallel.py",
+    # detect it here and abort with a clear message.
+    # ------------------------------------------------------------------
+    try:
+        from fipy import parallel as _fipy_parallel
+        if _fipy_parallel.Nproc > 1:
+            raise RuntimeError(
+                'grompy_parallel.py uses Python multiprocessing and cannot be '
+                'run under mpirun.  Use grompy.py for MPI parallel solves, or '
+                'run grompy_parallel.py without mpirun for multi-scenario '
+                'multiprocessing.'
+            )
+    except ImportError:
+        pass
+
     #year = 365.25 * 24 * 60.0 * 60.0
 
     #brackish_conc = 0.035 * 0.99

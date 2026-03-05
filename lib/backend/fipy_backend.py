@@ -31,6 +31,15 @@ try:
 except ImportError:
     FIPY_AVAILABLE = False
 
+# Optional PETSc solvers — available when running under mpirun with petsc4py installed.
+# Falls back silently to the default SciPy-based solvers when not available.
+try:
+    from fipy.solvers.petsc import LinearGMRESSolver as PETScGMRESSolver
+    from fipy.solvers.petsc import LinearPCGSolver as PETScPCGSolver
+    PETSC_AVAILABLE = True
+except ImportError:
+    PETSC_AVAILABLE = False
+
 from lib.backend.base import BackendBase, MeshBase, FieldBase, PDESolverBase
 
 
@@ -518,13 +527,22 @@ class FiPyPDESolver(PDESolverBase):
         elif self._Y != 0:
             eq = eq + self._Y  # +Y because FiPy uses opposite sign convention
         
-        # Choose solver
-        if self._solver_method.upper() == 'PCG' and self._symmetric:
-            solver = LinearPCGSolver(tolerance=self._tolerance,
-                                    iterations=self._max_iterations)
+        # Choose solver — prefer PETSc (MPI-parallel) when available, fall back to
+        # the default SciPy-based solvers for serial / non-PETSc environments.
+        if PETSC_AVAILABLE:
+            if self._solver_method.upper() == 'PCG' and self._symmetric:
+                solver = PETScPCGSolver(tolerance=self._tolerance,
+                                        iterations=self._max_iterations)
+            else:
+                solver = PETScGMRESSolver(tolerance=self._tolerance,
+                                          iterations=self._max_iterations)
         else:
-            solver = LinearGMRESSolver(tolerance=self._tolerance,
-                                       iterations=self._max_iterations)
+            if self._solver_method.upper() == 'PCG' and self._symmetric:
+                solver = LinearPCGSolver(tolerance=self._tolerance,
+                                        iterations=self._max_iterations)
+            else:
+                solver = LinearGMRESSolver(tolerance=self._tolerance,
+                                           iterations=self._max_iterations)
         
         # Solve
         eq.solve(var=self._solution, solver=solver)
