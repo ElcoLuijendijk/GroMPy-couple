@@ -736,6 +736,36 @@ class TestSaltWedgeBenchmarkModelRun:
               f"{nsteps} timesteps, "
               f"Max Conc: {Conc.max():.4f}")
 
+    @pytest.mark.fast
+    def test_smoke_run_produces_nonzero_concentration(self, tmp_path):
+        """Minimal 2-second run to confirm salt BC is active and model executes.
+
+        Uses tmp_path so no files are left in the repo. Does not depend on any
+        specific values from model_parameters_sw_benchmark.py.
+        """
+        from lib.grompy_fipy import run_coupled_flow_model_fipy
+
+        params = ModelParameters()
+        params.total_time = 2.0
+        params.dt_max = 2.0
+        params.output_interval = 2.0
+
+        opts = ModelOptions()
+        opts.backend = 'fipy'
+        opts.model_output_dir = str(tmp_path)
+
+        mesh_file = str(tmp_path / '_smoke_test.msh')
+        setup_rectangular_mesh_fipy(params, mesh_file)
+
+        result = run_coupled_flow_model_fipy(params, opts, mesh_file)
+
+        assert result is not None, "Model returned no result"
+        conc = result[5]
+        assert conc.max() > 0.001, (
+            f"Max concentration {conc.max():.6f} too low — "
+            "salt boundary condition may not be working"
+        )
+
 
 # =============================================================================
 # PART 3: EXPERIMENTAL COMPARISON TESTS
