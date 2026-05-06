@@ -55,7 +55,7 @@ concs = []
 freshwater_fluxes = []
 
 for vtk_file, vtkf_file in zip(vtk_files, vtkf_files):
-    print 'reading vtk file %s' % vtk_file
+    print('reading vtk file %s' % vtk_file)
 
     xy, conn, pt_var_names, pt_var_arrays, cell_var_names, cell_var_arrays = \
         lib.read_vtu_file.read_vtu_file(vtk_file)
@@ -63,7 +63,7 @@ for vtk_file, vtkf_file in zip(vtk_files, vtkf_files):
     #fnf = os.path.join(folder, vtkf_file)
     fnf = vtkf_file
 
-    print 'reading vtk file %s' % fnf
+    print('reading vtk file %s' % fnf)
 
     #xy_pts_face, conn_face, pt_var_names_face, pt_var_arrays_face, cell_var_names_face, cell_var_arrays_face = \
     #    lib.read_vtu_file.read_vtu_file(vtkf_file)
@@ -124,11 +124,11 @@ for vtk_file, vtkf_file in zip(vtk_files, vtkf_files):
 
 # calculate width dispersion zone between fresh and salt water
 # should be approx 1 wide acc. to experimental results:
-print '-' * 20
-print 'Width of modeled fresh-salt water mixing zone:'
+print('-' * 20)
+print('Width of modeled fresh-salt water mixing zone:')
 width_mixing_zone = np.array([(xsi[0] - xsi[2]) for xsi in xs])
 for i, w in enumerate(width_mixing_zone):
-    print 'run %i, average width of mixing zone = %0.03f m' % (i + 1, np.mean(w[w > 0]))
+    print('run %i, average width of mixing zone = %0.03f m' % (i + 1, np.mean(w[w > 0])))
 
 # calculate analytical depth of transition fresh-salt water acc. to Glover (1959):
 # note, fluxes reported in Goswami & Clement include third dimension with length of 2.7 cm
@@ -148,12 +148,12 @@ yg = 0.26 - np.array(dg)
 ###############
 # report fluxes
 ###############
-print '-' * 20
-print 'Comparison modeled and observed fluxes, steady-state experiments 1, 2 and 3 (cm3/sec):'
+print('-' * 20)
+print('Comparison modeled and observed fluxes, steady-state experiments 1, 2 and 3 (cm3/sec):')
 Q_measured = Qs * 1e4 * 2.7
-print 'measured: ', Q_measured
+print('measured: ', Q_measured)
 Q_modeled_transformed = -np.array(freshwater_fluxes) * 1e4 * 2.7
-print 'modeled:  ', Q_modeled_transformed
+print('modeled:  ', Q_modeled_transformed)
 
 ##################################
 # calculate misfit models and data
@@ -161,7 +161,7 @@ print 'modeled:  ', Q_modeled_transformed
 mean_errors = []
 mean_abs_errors = []
 rmses = []
-for i in xrange(3):
+for i in range(3):
 
     xc = 'x_ss%i' % (i + 1)
     yc = 'y_ss%i' % (i + 1)
@@ -174,14 +174,14 @@ for i in xrange(3):
     mean_abs_errors.append(np.mean(np.abs(model_error)))
     rmses.append(np.sqrt(np.mean(model_error**2)))
 
-print '-' * 20
-print 'Misfit modeled and observed x coordinate salt wedge (m):'
-for i in xrange(3):
-    print 'experiment %i' % (i + 1)
-    print '\tmean error = %0.4f' % mean_errors[i]
-    print '\tmean abs error = %0.4f' % mean_abs_errors[i]
-    print '\trmse = %0.4f' % rmses[i]
-print '-' * 20
+print('-' * 20)
+print('Misfit modeled and observed x coordinate salt wedge (m):')
+for i in range(3):
+    print('experiment %i' % (i + 1))
+    print('\tmean error = %0.4f' % mean_errors[i])
+    print('\tmean abs error = %0.4f' % mean_abs_errors[i])
+    print('\trmse = %0.4f' % rmses[i])
+print('-' * 20)
 
 ####################################
 # make a figure of the model results
@@ -199,7 +199,7 @@ ax.set_ylim(0.0, 0.26)
 
 leg_data_all = []
 
-for i in xrange(3):
+for i in range(3):
 
     xc = 'x_ss%i' % (i + 1)
     yc = 'y_ss%i' % (i + 1)
@@ -227,11 +227,11 @@ ax.legend(legs, labels, frameon=False, fontsize='small')
 fig.tight_layout()
 
 fn_fig = 'benchmark_data/model_vs_experimental_salt_wedge.pdf'
-print 'saving figure as %s' % fn_fig
+print('saving figure as %s' % fn_fig)
 fig.savefig(fn_fig)
 
 fn_fig = 'benchmark_data/model_vs_experimental_salt_wedge.png'
-print 'saving figure as %s' % fn_fig
+print('saving figure as %s' % fn_fig)
 fig.savefig(fn_fig)
 
-print 'done'
+print('done')

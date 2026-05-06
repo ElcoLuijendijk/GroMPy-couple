@@ -44,19 +44,19 @@ if model_result_file is None:
     files = [os.path.join(default_dir, directory) for directory in files]
     files.sort(key=os.path.getmtime)
     for i, f in enumerate(files):
-        print i, f
+        print(i, f)
 
-    print 'select directory number'
-    #folder = os.path.join(default_dir, files[int(raw_input())])
-    folder = files[int(raw_input())]
+    print('select directory number')
+    #folder = os.path.join(default_dir, files[int(input())])
+    folder = files[int(input())]
 
     files = os.listdir(folder)
     files = [os.path.join(folder, f) for f in files if f[-4:] == '.csv']
     files.sort()
     for i, f in enumerate(files):
-        print i, os.path.split(f)[-1]
-    print 'select file number'
-    model_result_file = files[int(raw_input())]
+        print(i, os.path.split(f)[-1])
+    print('select file number')
+    model_result_file = files[int(input())]
 
 
 folder = os.path.split(model_result_file)[0]
@@ -99,7 +99,7 @@ model_nos = df.index
 
 for fileno, vtk_file in zip(model_nos, vtk_files):
 
-    print 'reading vtk file %s' % vtk_file
+    print('reading vtk file %s' % vtk_file)
 
     fnv = os.path.join(folder, vtk_file)
     xy_pts, conn, pt_var_names, pt_var_arrays, cell_var_names, cell_var_arrays = \
@@ -163,7 +163,7 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
         ind_land_in = ind_land * bfy < 0
 
     # new method from figure script:
-    print 'find top bnd fluxes'
+    print('find top bnd fluxes')
     if 'nodal_flux_surface' in pt_var_names:
         f_ind = pt_var_names.index('nodal_flux')
     nfx = pt_var_arrays[f_ind][:, 0]
@@ -188,7 +188,7 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
     top_xy_sorted = topxy[x_order]
     nodal_flux_top_sorted = nodal_flux[bnd_ind][x_order]
 
-    print 'rotate flux'
+    print('rotate flux')
     nodal_flux_top = \
         get_normal_flux_to_bnd(nodal_flux_top_sorted,
                                top_xy_sorted)
@@ -260,7 +260,7 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
 
     flux_top_sorted = np.array([qx_top_sorted, qy_top_sorted]).T
 
-    print 'rotate flux'
+    print('rotate flux')
     flux_top = \
         get_normal_flux_to_bnd(flux_top_sorted,
                                top_xy_ele)
@@ -285,37 +285,37 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
     # store results in pandas dataframe
     ####################################
     # store filename
-    df.ix[fileno, 'model_name'] = vtk_file
+    df.loc[fileno, 'model_name'] = vtk_file
 
     # calculate fluxes
 
     # total
-    df.ix[fileno, 'vtk_flux_in'] = np.sum(flux_top_int[flux_in_ele])
-    df.ix[fileno, 'vtk_flux_out'] = np.sum(flux_top_int[flux_out_ele])
+    df.loc[fileno, 'vtk_flux_in'] = np.sum(flux_top_int[flux_in_ele])
+    df.loc[fileno, 'vtk_flux_out'] = np.sum(flux_top_int[flux_out_ele])
 
     # sea
-    df.ix[fileno, 'vtk_flux_sea_in'] = np.sum(flux_top_int[ind_sea_in_ele])
-    df.ix[fileno, 'vtk_flux_sea_out'] = np.sum(flux_top_int[ind_sea_out_ele])
-    df.ix[fileno, 'vtk_flux_sea_total'] = np.sum(flux_top_int[ind_sea_ele])
-    df.ix[fileno, 'vtk_min_flux_sea'] = np.min(nodal_flux_top[:, 1][ind_sea])
-    df.ix[fileno, 'vtk_max_flux_sea'] = np.max(nodal_flux_top[:, 1][ind_sea])
+    df.loc[fileno, 'vtk_flux_sea_in'] = np.sum(flux_top_int[ind_sea_in_ele])
+    df.loc[fileno, 'vtk_flux_sea_out'] = np.sum(flux_top_int[ind_sea_out_ele])
+    df.loc[fileno, 'vtk_flux_sea_total'] = np.sum(flux_top_int[ind_sea_ele])
+    df.loc[fileno, 'vtk_min_flux_sea'] = np.min(nodal_flux_top[:, 1][ind_sea])
+    df.loc[fileno, 'vtk_max_flux_sea'] = np.max(nodal_flux_top[:, 1][ind_sea])
 
     # land
-    df.ix[fileno, 'vtk_flux_land_in'] = np.sum(flux_top_int[ind_land_in_ele])
-    df.ix[fileno, 'vtk_flux_land_out'] = np.sum(flux_top_int[ind_land_out_ele])
-    df.ix[fileno, 'vtk_flux_land_total'] = np.sum(flux_top_int[ind_land_ele])
-    df.ix[fileno, 'vtk_min_flux_land'] = np.min(flux_top[:, 1][ind_land_ele])
-    df.ix[fileno, 'vtk_max_flux_land'] = np.max(flux_top[:, 1][ind_land_ele])
-    df.ix[fileno, 'vtk_flux_land_right_hand_bnd'] = flux_top[:, 1][ind_land_ele][-1]
+    df.loc[fileno, 'vtk_flux_land_in'] = np.sum(flux_top_int[ind_land_in_ele])
+    df.loc[fileno, 'vtk_flux_land_out'] = np.sum(flux_top_int[ind_land_out_ele])
+    df.loc[fileno, 'vtk_flux_land_total'] = np.sum(flux_top_int[ind_land_ele])
+    df.loc[fileno, 'vtk_min_flux_land'] = np.min(flux_top[:, 1][ind_land_ele])
+    df.loc[fileno, 'vtk_max_flux_land'] = np.max(flux_top[:, 1][ind_land_ele])
+    df.loc[fileno, 'vtk_flux_land_right_hand_bnd'] = flux_top[:, 1][ind_land_ele][-1]
 
-    df.ix[fileno, 'vtk_bnd_flux_left'] = flux_top[0, 1]
-    df.ix[fileno, 'vtk_bnd_flux_right'] = flux_top[-1, 1]
+    df.loc[fileno, 'vtk_bnd_flux_left'] = flux_top[0, 1]
+    df.loc[fileno, 'vtk_bnd_flux_right'] = flux_top[-1, 1]
 
-    df.ix[fileno, 'vtk_submarine_discharge_area'] = np.sum(dist * ind_sea_out)
-    df.ix[fileno, 'vtk_submarine_recharge_area'] = np.sum(dist * ind_sea_in)
+    df.loc[fileno, 'vtk_submarine_discharge_area'] = np.sum(dist * ind_sea_out)
+    df.loc[fileno, 'vtk_submarine_recharge_area'] = np.sum(dist * ind_sea_in)
 
-    df.ix[fileno, 'vtk_land_discharge_area'] = np.sum(dist * ind_land_out)
-    df.ix[fileno, 'vtk_land_recharge_area'] = np.sum(dist * ind_land_in)
+    df.loc[fileno, 'vtk_land_discharge_area'] = np.sum(dist * ind_land_out)
+    df.loc[fileno, 'vtk_land_recharge_area'] = np.sum(dist * ind_land_in)
 
     # calculate area where absolute flux exceeds 0.1 m/yr or 50% of the max flux
     flux_thresholds = [0.1, 0.5 * np.max(np.abs(flux_top[:, 1]))]
@@ -330,9 +330,9 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
         ind_land_in_threshold = ind_land_ele & flux_in_threshold
         ind_land_out_threshold = ind_land_ele & flux_out_threshold
 
-        df.ix[fileno, 'vtk_submarine_discharge_area_threshold_50perc_max'] = \
+        df.loc[fileno, 'vtk_submarine_discharge_area_threshold_50perc_max'] = \
             np.sum(dist_ele * ind_sea_out_threshold)
-        df.ix[fileno, 'vtk_land_discharge_area_threshold_50perc_max'] = \
+        df.loc[fileno, 'vtk_land_discharge_area_threshold_50perc_max'] = \
             np.sum(dist_ele * ind_land_out_threshold)
 
     # calculate normalized cumulative flux
@@ -346,27 +346,27 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
     for flux_threshold2 in flux_thresholds2:
         try:
             ind_landc = np.where(cumulative_flux_top_land > flux_threshold2)[0][0]
-            df.ix[fileno, 'vtk_land_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = \
+            df.loc[fileno, 'vtk_land_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = \
                 np.sum(dist_ele[ind_land_out_ele][:ind_landc])
         except:
-            df.ix[fileno, 'vtk_land_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = 0.0
+            df.loc[fileno, 'vtk_land_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = 0.0
 
         try:
             ind_seac = np.where(cumulative_flux_top_sea > flux_threshold2)[0][-1]
-            df.ix[fileno, 'vtk_sea_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = \
+            df.loc[fileno, 'vtk_sea_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = \
                 np.sum(dist_ele[ind_sea_out_ele][ind_seac:])
         except:
-            df.ix[fileno, 'vtk_sea_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = 0.0
+            df.loc[fileno, 'vtk_sea_discharge_area_%0.0fperc' % (flux_threshold2 * 100.0)] = 0.0
 
     # flux from land to sea (= fresh submarine groundwater discharge)
-    df.ix[fileno, 'vtk_flux_land_to_sea'] = df.ix[fileno, 'vtk_flux_sea_out'] \
-            + df.ix[fileno, 'vtk_flux_sea_in']
+    df.loc[fileno, 'vtk_flux_land_to_sea'] = df.loc[fileno, 'vtk_flux_sea_out'] \
+            + df.loc[fileno, 'vtk_flux_sea_in']
 
     #
-    df.ix[fileno, 'vtk_flux_total'] = np.sum(flux_top_int)
+    df.loc[fileno, 'vtk_flux_total'] = np.sum(flux_top_int)
 
     # relative error in top bnd flux,
-    df.ix[fileno, 'vtk_flux_error'] = np.abs(np.sum(flux_top_int)) / (np.abs(np.sum(flux_top_int[flux_top_int<0]))
+    df.loc[fileno, 'vtk_flux_error'] = np.abs(np.sum(flux_top_int)) / (np.abs(np.sum(flux_top_int[flux_top_int<0]))
                                                                        + np.abs(np.sum(flux_top_int[flux_top_int>0])))
 
     # add max extent seepage bnd:
@@ -375,21 +375,21 @@ for fileno, vtk_file in zip(model_nos, vtk_files):
         s = pt_var_arrays[si]
         if s.max() >= 1:
             xys = xy_pts[s == 1]
-            df.ix[fileno, 'max_x_active_seepage_bnd'] = xys[:, 0].max()
+            df.loc[fileno, 'max_x_active_seepage_bnd'] = xys[:, 0].max()
         else:
-            df.ix[fileno, 'max_x_active_seepage_bnd'] = np.nan
+            df.loc[fileno, 'max_x_active_seepage_bnd'] = np.nan
 
-    print 'flux sea out (m2/yr) = ', df.ix[fileno, 'vtk_flux_sea_out']
-    print 'flux sea in (m2/yr) = ', df.ix[fileno, 'vtk_flux_sea_in']
-    print 'flux land to sea (m2/yr) = ', df.ix[fileno, 'vtk_flux_land_to_sea']
-    print 'flux error (%) = ', df.ix[fileno, 'vtk_flux_error'] * 100.0
+    print('flux sea out (m2/yr) = ', df.loc[fileno, 'vtk_flux_sea_out'])
+    print('flux sea in (m2/yr) = ', df.loc[fileno, 'vtk_flux_sea_in'])
+    print('flux land to sea (m2/yr) = ', df.loc[fileno, 'vtk_flux_land_to_sea'])
+    print('flux error (%) = ', df.loc[fileno, 'vtk_flux_error'] * 100.0)
 
 # join input and fluxes dataframe
 df_final = df
 
 fn_merged = model_result_file.split('.')[0] + '_with_bnd_stats.csv'
 
-print 'saving input params and bnd fluxes to %s' % fn_merged
+print('saving input params and bnd fluxes to %s' % fn_merged)
 df_final.to_csv(fn_merged, index_label='model_run_no_v2')
 
-print 'done'
+print('done')
