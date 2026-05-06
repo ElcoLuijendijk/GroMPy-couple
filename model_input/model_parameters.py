@@ -85,6 +85,13 @@ class ModelOptions():
     # which should be located in your .bashrc file
     max_proc = 4
 
+    # number of MPI ranks to use for parallel FiPy/PETSc linear solves
+    # note: the actual rank count is always determined by the mpirun invocation
+    #       (e.g. "mpirun -np 4 python grompy.py"); this parameter is for
+    #       documentation and validation purposes only.
+    # set to 1 (default) for serial runs without mpirun.
+    mpi_np = 1
+
     # option to run the set of model experiments in reverse order
     invert_model_run_order = False
 

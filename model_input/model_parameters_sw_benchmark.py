@@ -101,7 +101,7 @@ class ModelParameters(dict):
     # time:
     ########
     # initial timestep size
-    dt0 = 0.25  # (sec)
+    dt0 = 1.0  # (sec)
 
     # increase in timestep length after each timestep
     # NOTE: Original value was 1.0 (no growth). Changed to 1.5 for faster simulations.
@@ -109,19 +109,21 @@ class ModelParameters(dict):
     dt_inc = 1.5
 
     # maximum timestep size
-    dt_max = 10.0  # (sec)
+    dt_max = 60.0  # (sec)
 
     # total duration
     total_time = 80.0 * 60.0  # (sec)
 
     # time interval for which model stats are reported and figures are created
+    # if None, each timestep will be reported and saved, which can lead to very long runtimes and large output files
     output_interval = 5.0 * 60.0
+    #output_interval = None
 
     # maximum courant number allowed. Timestep sizes are reduced if
     # courant number is exceeded
     # set to None to turn this feature off
-    max_allowed_CFL_number = 1.0
-    #max_allowed_CFL_number = None
+    #max_allowed_CFL_number = 1.0
+    max_allowed_CFL_number = None
 
     # force timesteps to be recalculated to have CFL condition = max_allowed_CFL_number
     # turning this option on makes sure that the timestep size is always the max stable size
@@ -154,11 +156,12 @@ class ModelParameters(dict):
     thickness = 0.26  # (m)
 
     # grid cell size, not used when mesh type = 'rectangle'
-    cellsize = 0.0025  # (m)
+    cellsize = 0.01  # (m)
+    #cellsize = 0.0025  # (m)
 
     # x and y cell size, only used when mesh type = 'rectangle'
-    cellsize_x = 0.0025  # (m)
-    cellsize_y = 0.0025  # (m)
+    cellsize_x = 0.01  # (m)
+    cellsize_y = 0.01  # (m)
 
     # length of model domain
     # = length of landward side if coastal mesh is used
@@ -242,7 +245,7 @@ class ModelParameters(dict):
     specified_concentration_ymax = [0.255, 0.26]  # (m)
 
     # switch off concentration boundary for discharge nodes
-    concentration_bnd_inflow_only = True
+    concentration_bnd_inflow_only = False
 
     # direction of inflow, choose 'left' 'right', 'up' or 'down'
     # 'left' means that any inflow is coming from the left
@@ -323,8 +326,8 @@ class ModelParameters(dict):
     disp_ratio = 0.1  # (dimensionless)
 
     ## settings for iterative solver solute & pressure PDEs
-    pressure_convergence_criterion = 1.0e-5  # [Pa]
-    concentration_convergence_criterion = 1.0e-5  # [kg/kg]
+    pressure_convergence_criterion = 1.0  # [Pa]
+    concentration_convergence_criterion = 1.0e-3  # [kg/kg]
 
     # maximum iterations for sequential iterative solving of solute transport and
     # fluid flow equations
