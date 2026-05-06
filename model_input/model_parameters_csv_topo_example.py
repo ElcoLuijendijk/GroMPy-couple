@@ -167,6 +167,15 @@ class ModelParameters(dict):
     # length of model domain
     L = 500  # (m)
 
+    # Representative topographic gradient used internally to rotate flux vectors
+    # to surface-normal/surface-tangential components for output reporting.
+    # For standard_csv_topo, the surface slope varies spatially so there is no
+    # single true value. Setting this to 0.0 disables rotation (fluxes are
+    # reported in the original x/y coordinate frame), which is always safe.
+    # If your profile is approximately planar you may set this to the mean slope
+    # (elevation_end - elevation_start) / L instead.
+    topo_gradient = 0.0
+
     #####################
     # boundary functions
     #####################
