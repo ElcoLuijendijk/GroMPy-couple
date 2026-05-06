@@ -319,7 +319,8 @@ class ParameterRanges():
     like to vary. For example k_s = [1e-16, 1e-15] will first run a model
     scenario with k = 1e-16 and then one with k = 1e-15.
     """
-
+    
+    k_s = [10**(-16.0)]
     #k_s = 10**np.arange(-16.0, -12.0, 1.0)
 
     pass

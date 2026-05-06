@@ -355,7 +355,7 @@ class ParameterRanges():
     will first run a model scenario with a gradient of 0.01 and then one
     with a gradient of 0.1
     """
-
+    k_s = [10**(-16.0)]
     #k_s = 10**np.arange(-16.0, -12.0, 1.0) 
 
     pass
