@@ -24,7 +24,7 @@ import os
 import inspect
 import datetime
 import random
-import imp
+import importlib.util
 
 import numpy as np
 import pandas as pd
@@ -414,8 +414,10 @@ def main():
         print('model input files: ', inp_file_loc)
 
         try:
-            model_parameters = imp.load_source('model_parameters', inp_file_loc)
-        except IOError:
+            _spec = importlib.util.spec_from_file_location('model_parameters', inp_file_loc)
+            model_parameters = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(model_parameters)
+        except (IOError, FileNotFoundError):
             msg = 'cannot find parameter file %s' % inp_file_loc
             raise IOError(msg)
 
