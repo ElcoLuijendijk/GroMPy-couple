@@ -320,6 +320,6 @@ class ParameterRanges():
     scenario with k = 1e-16 and then one with k = 1e-15.
     """
 
-    k_s = 10**np.arange(-16.0, -12.0, 1.0)
+    #k_s = 10**np.arange(-16.0, -12.0, 1.0)
 
     pass

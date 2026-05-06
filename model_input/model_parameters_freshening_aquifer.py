@@ -356,6 +356,6 @@ class ParameterRanges():
     with a gradient of 0.1
     """
 
-    k_s = 10**np.arange(-16.0, -12.0, 1.0) 
+    #k_s = 10**np.arange(-16.0, -12.0, 1.0) 
 
     pass
