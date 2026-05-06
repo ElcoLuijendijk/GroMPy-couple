@@ -465,6 +465,10 @@ def main():
     #    mesh_function = mesh_functions.setup_coastal_mesh_new
     elif ModelParameters.mesh_type == 'rectangle':
         mesh_function = mesh_functions.setup_rectangular_mesh
+    elif ModelParameters.mesh_type == 'standard_csv_topo':
+        mesh_function = mesh_functions.setup_standard_mesh_csv_topo
+    else:
+        mesh_function = mesh_functions.setup_standard_mesh
 
     # run multiple model scenarios
     print('=' * 35)

@@ -384,6 +384,153 @@ def setup_rectangular_mesh(Parameters,
     return mesh, surface, sea_surface, seawater, z_surface
 
 
+def setup_standard_mesh_csv_topo(Parameters, mesh_filename):
+    """
+    Create a mesh with a land surface elevation profile read from a CSV file.
+
+    The CSV file must have two columns named exactly 'distance' and 'elevation':
+      - 'distance': horizontal distance from the left-hand boundary (m)
+      - 'elevation': land surface elevation at that distance (m)
+
+    The profile is linearly interpolated onto mesh node x-coordinates. The
+    aquifer bottom is flat at z = -thickness (constant thickness domain).
+
+    Required Parameters attributes:
+      topo_csv_file  -- path to the CSV file (str)
+      L              -- model domain length (m)
+      thickness      -- aquifer thickness (m)
+      cellsize       -- target element size (m)
+    """
+    import pandas as pd
+
+    # ------------------------------------------------------------------
+    # 1. Read and validate the CSV
+    # ------------------------------------------------------------------
+    topo_df = pd.read_csv(Parameters.topo_csv_file)
+
+    required_cols = {'distance', 'elevation'}
+    missing = required_cols - set(topo_df.columns)
+    if missing:
+        raise ValueError(
+            "topo CSV file '%s' is missing required column(s): %s. "
+            "The file must contain columns named 'distance' and 'elevation'."
+            % (Parameters.topo_csv_file, ', '.join(sorted(missing)))
+        )
+
+    x_csv = topo_df['distance'].values.astype(float)
+    z_csv = topo_df['elevation'].values.astype(float)
+
+    # Sort by distance in case the CSV is not ordered
+    sort_idx = np.argsort(x_csv)
+    x_csv = x_csv[sort_idx]
+    z_csv = z_csv[sort_idx]
+
+    if x_csv[0] > 0.0:
+        raise ValueError(
+            "topo CSV file '%s' does not cover the full model domain: "
+            "minimum distance is %g m but the domain starts at x=0."
+            % (Parameters.topo_csv_file, x_csv[0])
+        )
+    if x_csv[-1] < Parameters.L:
+        raise ValueError(
+            "topo CSV file '%s' does not cover the full model domain: "
+            "maximum distance is %g m but the domain ends at x=%g m (Parameters.L)."
+            % (Parameters.topo_csv_file, x_csv[-1], Parameters.L)
+        )
+
+    # Restrict to [0, L] in case the CSV extends beyond the domain
+    mask = (x_csv >= 0.0) & (x_csv <= Parameters.L)
+    # Always include exact endpoints
+    x_csv = x_csv[mask]
+    z_csv = z_csv[mask]
+
+    # Ensure endpoints at exactly 0 and L are present
+    if x_csv[0] != 0.0:
+        z0 = float(np.interp(0.0, x_csv, z_csv))
+        x_csv = np.concatenate([[0.0], x_csv])
+        z_csv = np.concatenate([[z0], z_csv])
+    if x_csv[-1] != Parameters.L:
+        zL = float(np.interp(Parameters.L, x_csv, z_csv))
+        x_csv = np.concatenate([x_csv, [Parameters.L]])
+        z_csv = np.concatenate([z_csv, [zL]])
+
+    # ------------------------------------------------------------------
+    # 2. Build the gmsh geometry
+    # ------------------------------------------------------------------
+    # Corner points (bottom-left, bottom-right)
+    pt_bottom_left  = pc.Point(0.0,           -Parameters.thickness)
+    pt_bottom_right = pc.Point(Parameters.L,  -Parameters.thickness)
+
+    # Top-surface points from the CSV profile
+    top_pts = [pc.Point(float(x), float(z)) for x, z in zip(x_csv, z_csv)]
+
+    # Boundary lines
+    # Bottom
+    line_bottom = pc.Line(pt_bottom_left, pt_bottom_right)
+    # Right wall
+    line_right = pc.Line(pt_bottom_right, top_pts[-1])
+    # Top surface segments (one per consecutive pair of CSV points)
+    top_lines = [pc.Line(top_pts[i + 1], top_pts[i])
+                 for i in range(len(top_pts) - 1)]
+    # Left wall
+    line_left = pc.Line(top_pts[0], pt_bottom_left)
+
+    # Single curve loop: bottom -> right wall -> top (right to left) -> left wall
+    curve = pc.CurveLoop(
+        line_bottom,
+        line_right,
+        *top_lines,
+        line_left
+    )
+
+    domain_surface = pc.PlaneSurface(curve)
+
+    d = gmsh.Design(dim=2, element_size=Parameters.cellsize)
+
+    # Tag all top-surface segments under one property set
+    d.addItems(
+        pc.PropertySet('land', domain_surface),
+        pc.PropertySet('land_surface', *top_lines)
+    )
+
+    d.setMeshFileName(mesh_filename)
+
+    print('=' * 30)
+
+    mesh = fl.MakeDomain(d, optimizeLabeling=True)
+
+    # ------------------------------------------------------------------
+    # 3. Compute z_surface field on the mesh by interpolating the CSV profile
+    # ------------------------------------------------------------------
+    xy = mesh.getX()
+    # es.Data objects support numpy via esys.escript; convert x-coords to numpy
+    x_nodes = np.array(xy[0].toListOfTuples()).flatten()
+    z_surface_np = np.interp(x_nodes, x_csv, z_csv)
+
+    # Rebuild as an escript Data object on the same function space
+    z_surface = es.Data(0.0, xy[0].getFunctionSpace())
+    for i, zval in enumerate(z_surface_np):
+        # use the interpolated numpy array to build an escript field
+        pass
+    # Simpler: use arithmetic on xy[0] — interpolate via a piecewise linear
+    # construction using escript operations
+    z_surface = es.Data(0.0, xy.getFunctionSpace())
+    for i in range(len(x_csv) - 1):
+        x0, x1 = float(x_csv[i]), float(x_csv[i + 1])
+        z0, z1 = float(z_csv[i]), float(z_csv[i + 1])
+        in_segment = es.whereNonNegative(xy[0] - x0) * es.whereNonPositive(xy[0] - x1)
+        slope = (z1 - z0) / (x1 - x0)
+        z_segment = z0 + slope * (xy[0] - x0)
+        z_surface = z_surface + in_segment * z_segment
+
+    surface = es.whereZero(xy[1] - z_surface)
+
+    sea_surface = None
+    seawater = None
+
+    return mesh, surface, sea_surface, seawater, z_surface
+
+
 def setup_standard_mesh(Parameters, mesh_filename):
     """
     Create a mesh with bi-linear surface topography
