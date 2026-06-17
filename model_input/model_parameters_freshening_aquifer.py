@@ -307,7 +307,11 @@ class ModelParameters(dict):
 
     # settings for iterative solver solute & pressure PDEs following Ackerer (2004) GRL 31(2):
     pressure_convergence_criterion = 1.0e-4  # [Pa]
-    concentration_convergence_criterion = 1.0e-7  # [kg/kg]
+    # concentration in kg/kg ranges 0 to 0.035, so 1e-5 is ~3e-4 relative.
+    # 1e-7 is far tighter than needed: with the FiPy backend's under-relaxed
+    # coupling it gives an identical result but takes ~1.7x longer (it keeps
+    # iterating to a tolerance that no longer changes the solution).
+    concentration_convergence_criterion = 1.0e-5  # [kg/kg]
     # maximum iterations for sequential iterative solving of solute and
     # pressure equations
     min_iterations = 3

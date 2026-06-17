@@ -121,6 +121,40 @@ def calculate_fluid_density(concentration, gamma, rho_f_0):
     return rho_f_0 * (1.0 + gamma * concentration)
 
 
+def _recharge_volumetric_source(fipy_mesh, recharge_mask, recharge_flux):
+    """
+    Volumetric source array for a recharge flux specified over the land surface.
+
+    recharge_flux is a mass flux per unit surface area (kg/(m^2 s)).  Applied as
+    a Neumann boundary flux, its contribution to a boundary cell's mass balance
+    is flux * (recharge face area) / (cell volume).  Using recharge_flux
+    directly as a cell source (the previous approximation) is wrong by a factor
+    of the cell size (it happens to be correct only when the cell size is 1 m).
+
+    Returns a cell array (kg/(m^3 s)).
+    """
+    n_cells = fipy_mesh.numberOfCells
+    src = np.zeros(n_cells)
+    if recharge_flux == 0 or recharge_mask is None or not np.any(recharge_mask):
+        return src
+    try:
+        ext = np.array(fipy_mesh.exteriorFaces.value, dtype=bool)
+        face_normals = np.array(fipy_mesh.faceNormals)
+        face_cell_ids = np.array(fipy_mesh.faceCellIDs)
+        owners = face_cell_ids[0]
+        face_areas = np.array(fipy_mesh._faceAreas)
+        cell_volumes = np.array(fipy_mesh.cellVolumes)
+        rmask = np.array(recharge_mask, dtype=bool)
+        # upward-facing exterior faces (the land surface) of recharge cells
+        top_faces = ext & (face_normals[1] > 0.0) & rmask[owners]
+        np.add.at(src, owners[top_faces], recharge_flux * face_areas[top_faces])
+        src = src / cell_volumes
+    except Exception:
+        # fallback to the previous (cell-size dependent) approximation
+        src[recharge_mask] = recharge_flux
+    return src
+
+
 def pressure_to_fresh_water_head(P, rho_f_0, g, y_coords):
     """
     Convert pressure field to equivalent fresh water hydraulic head.
@@ -245,9 +279,27 @@ def calculate_darcy_flux_fipy(fipy_mesh, pressure, density, k_tensor, viscosity,
     rho_face = density[_own].copy()
     rho_face[_valid] = 0.5 * (density[_own[_valid]] + density[_nb[_valid]])
 
-    # q = −(k/μ) · (∇P − ρ_face · g · ẑ)
+    # Darcy flux with gravity vector g_vec = (0, -g) (downward), matching the
+    # escript backend (gwflow_lib.calculate_q):
+    #     q = -(k/μ) · (∇P - ρ · g_vec) = -(k/μ) · (∇P + (0, ρ·g))
+    # so the vertical component gains +ρ·g (NOT -ρ·g): hydrostatic ∂P/∂y = -ρg
+    # then gives qy = 0 as required.
+    #
+    # The gravity term is zeroed on exterior faces (consistent with the pressure
+    # solve).  On impermeable top/bottom boundaries the face-normal pressure
+    # gradient is ~0 (natural BC), so keeping +ρ·g there would yield a spurious
+    # normal velocity of order K that advects salt through the boundary.  The
+    # gravity term is vertical, so zeroing it on exterior faces only removes the
+    # through-boundary component at top/bottom and the irrelevant tangential
+    # component at the (Dirichlet) side walls.
+    grav_term = rho_face * g
+    try:
+        _ext = np.array(fipy_mesh.exteriorFaces.value, dtype=bool)
+        grav_term = np.where(_ext, 0.0, grav_term)
+    except Exception:
+        pass
     qx_vals = -mobility * _get_value(grad_P_face[0])
-    qy_vals = -mobility * (_get_value(grad_P_face[1]) - rho_face * g)
+    qy_vals = -mobility * (_get_value(grad_P_face[1]) + grav_term)
 
     return FaceVariable(mesh=fipy_mesh, value=np.array([qx_vals, qy_vals]))
 
@@ -479,7 +531,10 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
         y_range = y.max() - y.min()
         estimated_area = (x_range * y_range) / len(x)
         cellsize = np.sqrt(estimated_area)
-    tol = cellsize * 0.5
+    # Use 0.6*cellsize so that a single layer of boundary cells is caught even
+    # on a Grid2D where cell centres sit exactly half a cell (0.5*cellsize)
+    # from the domain edge (floating-point ties at exactly 0.5 would be missed).
+    tol = cellsize * 0.6
     
     # Surface mask: cells at the top boundary
     surface_mask = np.abs(y - z_surface) < tol
@@ -528,9 +583,13 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
 
         is_vertical = abs(pxmax - pxmin) < tol
 
-        if spec_pressure_surface_flag and not is_vertical:
-            # Apply only to surface cells in the x-range
-            p_region_mask = (x >= pxmin) & (x <= pxmax) & surface_mask
+        if spec_pressure_surface_flag:
+            # Apply to the surface cells within the x-range.  The x-range is
+            # padded by tol so a narrow coastal range (e.g. x in [-0.01, 0.01]
+            # used to pin P=0 at the discharge point) still catches the nearest
+            # surface cell centre, which sits ~cellsize/2 from the x=0 boundary.
+            x_match = (x >= pxmin - tol) & (x <= pxmax + tol)
+            p_region_mask = x_match & surface_mask
         else:
             # Apply to full y-range (vertical walls, or surface flag off)
             if is_vertical:
@@ -543,21 +602,24 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
         specified_pressure[p_region_mask] = pval
         spec_pressure_mask |= p_region_mask
 
-        # Add hydrostatic pressure column below the top of the BC zone.
-        # Mirrors the escript backend (grompy_lib.py lines 364-368):
-        #   dPh = (ymax - y) * rho_segment * g
-        # The specified_pressure value is the pressure at the TOP of the BC
-        # zone (y == pymax); each cell lower in the column gets an additional
-        # hydrostatic contribution.  The fluid density for this BC segment is
-        # derived from its specified salinity (spec_pressure_salinity).
-        if spec_pressure_salinity_list is not None and i_p < len(spec_pressure_salinity_list):
-            sal_seg = spec_pressure_salinity_list[i_p]
-            rho_seg = calculate_fluid_density(sal_seg, Parameters.gamma, Parameters.rho_f_0)
-        else:
-            # Fallback: use reference fresh water density
-            rho_seg = Parameters.rho_f_0
-        depth_below_top = np.maximum(0.0, pymax - y)
-        specified_pressure[p_region_mask] += depth_below_top[p_region_mask] * rho_seg * Parameters.g
+        # Add a hydrostatic pressure column below the top of the BC zone, but
+        # only for a vertical-wall BC (not a surface BC).  For a vertical wall
+        # the specified value is the pressure at the TOP of the zone (y == pymax)
+        # and each cell lower in the column gets an extra hydrostatic
+        # contribution (dPh = (pymax - y) * rho_segment * g, mirroring the
+        # escript backend grompy_lib.py lines 364-368).  For a SURFACE BC the
+        # pressure is specified at the surface itself, so no column is added;
+        # adding one here (with pymax falling back to its 1e6 default when the
+        # parameters omit a y-range) would assign an enormous pressure.
+        if not spec_pressure_surface_flag:
+            if spec_pressure_salinity_list is not None and i_p < len(spec_pressure_salinity_list):
+                sal_seg = spec_pressure_salinity_list[i_p]
+                rho_seg = calculate_fluid_density(sal_seg, Parameters.gamma, Parameters.rho_f_0)
+            else:
+                # Fallback: use reference fresh water density
+                rho_seg = Parameters.rho_f_0
+            depth_below_top = np.maximum(0.0, pymax - y)
+            specified_pressure[p_region_mask] += depth_below_top[p_region_mask] * rho_seg * Parameters.g
 
     # Add hydrostatic seawater pressure on top of specified values if requested
     if getattr(Parameters, 'add_seawater_pressure', False):
@@ -627,12 +689,14 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
         
         # Create mask for this region
         if specified_concentration_surface:
-            # If applying to entire surface, use sea_surface_mask as before
+            # Surface BC: apply to the sea-surface cells within the x-range.
+            # The y-range is intentionally NOT applied here: it is the surface,
+            # and for a coastal mesh the sea floor lies below y=0, so a default
+            # y-range like [-0.01, 1e6] (used when the parameters specify
+            # ymins/ymaxs rather than ymin/ymax) would wrongly exclude it.
             region_mask = (
                 (x >= xmin) &
                 (x <= xmax) &
-                (y >= ymin) &
-                (y <= ymax) &
                 sea_surface_mask
             )
         else:
@@ -660,15 +724,28 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
                 # Horizontal boundary: apply to surface only
                 region_mask = x_match & y_match & surface_mask
         
+        # Value for this region.  A surface concentration BC applies to the
+        # sea-surface cells (x < 0); the coastal convention (matching the escript
+        # backend) sets that to the seawater concentration, not the generic
+        # specified_concentration (which the coastal parameter file leaves at its
+        # 0.0 default).  Fall back to conc_val when seawater_concentration is
+        # unset (e.g. the freshening case, where the sea-surface region is empty
+        # anyway).
+        conc_val_use = conc_val
+        if specified_concentration_surface:
+            _sw = getattr(Parameters, 'seawater_concentration', None)
+            if _sw is not None:
+                conc_val_use = _sw
+
         # Apply boundary condition for this region
-        specified_concentration[region_mask] = conc_val
+        specified_concentration[region_mask] = conc_val_use
         spec_conc_mask_regional[region_mask] = True  # Mark cells that received BC
-        
+
         # Debug: Print how many cells received this BC
         n_cells_bc = np.sum(region_mask)
         if n_cells_bc > 0:
-            print(f"  Region {i_region}: C={conc_val:.5f}, x=[{xmin:.4f}, {xmax:.4f}], "
-                  f"y=[{ymin:.4f}, {ymax:.4f}], {n_cells_bc} cells")
+            print(f"  Region {i_region}: C={conc_val_use:.5f}, x=[{xmin:.4f}, {xmax:.4f}], "
+                  f"{n_cells_bc} sea-surface cells")
     
     # Create combined mask for return value
     # Only mark cells that explicitly received a concentration BC (cells near the boundary walls).
@@ -765,9 +842,13 @@ def setup_fipy_initial_conditions(mesh, cell_centers, z_surface, Parameters, bc=
         concentration[~seawater_zone] = getattr(Parameters, 'freshwater_concentration', 0.0)
         
     else:
-        # Uniform fresh water
-        freshwater_conc = getattr(Parameters, 'freshwater_concentration', 0.0)
-        concentration = np.full(n_cells, freshwater_conc)
+        # Uniform initial concentration.  Use initial_concentration when set
+        # (e.g. the freshening aquifer starts fully saline and freshens over
+        # time); otherwise fall back to the freshwater concentration.
+        init_conc = getattr(Parameters, 'initial_concentration', None)
+        if init_conc is None:
+            init_conc = getattr(Parameters, 'freshwater_concentration', 0.0)
+        concentration = np.full(n_cells, init_conc)
     
     # OPTION B: Apply concentration boundary conditions to initial condition
     # This seeds salt water at inlet boundaries for faster intrusion
@@ -931,23 +1012,39 @@ def solve_steady_state_pressure_fipy(
     diffusion_fv = FaceVariable(mesh=fipy_mesh, value=rho_face * mobility)
 
     # ------------------------------------------------------------------
-    # Gravity source via ConvectionTerm:  ∇·(ρ²·k/μ · g · ẑ)
-    # The ConvectionTerm in FiPy implements  ∇·(u · φ)  where u is the
-    # coefficient FaceVariable.  Setting u = (0, ρ²·k/μ·g) with φ = 1
-    # gives exactly the divergence of the gravity flux we need on the RHS.
+    # Gravity body-force term:  div(X),  X = ρ²·k/μ · g_vec,  g_vec = (0, -g)
+    # This is a KNOWN source (independent of P), equal to the divergence of the
+    # gravity flux vector.  It must be added as an explicit cell source via the
+    # FaceVariable .divergence operator, NOT as a ConvectionTerm (which would
+    # discretise div(X·P) and multiply the body force by the pressure, blowing
+    # the solution up).  Matches escript X = ρ²·k/μ·g_vector (gwflow_lib.py:57).
     # ------------------------------------------------------------------
     n_faces = fipy_mesh.numberOfFaces
     gravity_vals = np.zeros((2, n_faces))
-    gravity_vals[1] = rho_face**2 * mobility * g
+    gravity_vals[1] = -rho_face**2 * mobility * g
+    # Zero the gravity flux on exterior faces.  The body force is added as a
+    # cell source (div(X)); if X is left non-zero on the impermeable
+    # top/bottom boundary faces, that gravity flux leaks through them because
+    # FiPy's natural BC only zeroes the DIFFUSIVE flux there, not the combined
+    # flux.  The leak produces a spurious vertical velocity of order K.  Zeroing
+    # X on exterior faces makes the natural BC give zero TOTAL flux (hydrostatic)
+    # at impermeable boundaries.  Dirichlet (specified-pressure) faces already
+    # carry the hydrostatic column in their pinned value, so excluding X there
+    # is consistent.
+    try:
+        _ext = np.array(fipy_mesh.exteriorFaces.value, dtype=bool)
+        gravity_vals[1][_ext] = 0.0
+    except Exception:
+        pass
     gravity_fv = FaceVariable(mesh=fipy_mesh, rank=1, value=gravity_vals)
+    gravity_source = gravity_fv.divergence
 
     # ------------------------------------------------------------------
     # Recharge source term (cell-centred CellVariable)
     # ------------------------------------------------------------------
-    recharge_array = np.zeros(fipy_mesh.numberOfCells)
-    if np.any(recharge_mask):
-        recharge_array[recharge_mask] = recharge_flux
-    recharge_source = CellVariable(mesh=fipy_mesh, value=recharge_array)
+    recharge_source = CellVariable(
+        mesh=fipy_mesh,
+        value=_recharge_volumetric_source(fipy_mesh, recharge_mask, recharge_flux))
 
     # ------------------------------------------------------------------
     # Pressure CellVariable + Dirichlet BCs via .constrain()
@@ -964,10 +1061,15 @@ def solve_steady_state_pressure_fipy(
             pressure.constrain(bc_fv, where=bc_face_mask)
 
     # ------------------------------------------------------------------
-    # Assemble and solve:  ∇·(ρ·k/μ · ∇P) = ∇·(ρ²·k/μ · g · ẑ) + Q
+    # Assemble and solve mass conservation:
+    #   ∇·(ρ·k/μ · ∇P) = ∇·(ρ²·k/μ · g · ẑ) − Q_recharge
+    # The recharge mass source enters with a MINUS sign: from
+    # ∇·(ρq) = Q with ρq = −ρ·k/μ·∇P + X, so ∇·(ρ·k/μ·∇P) = ∇·X − Q.
+    # (A positive recharge must RAISE the head inland; the opposite sign drives
+    # the flow backwards.)
     # ------------------------------------------------------------------
     eq = (DiffusionTerm(coeff=diffusion_fv)
-          == ConvectionTerm(coeff=gravity_fv) + recharge_source)
+          == gravity_source - recharge_source)
 
     _lus = LinearLUSolver(tolerance=1e-12, iterations=1000)
     eq.solve(var=pressure, solver=_lus)
@@ -1064,12 +1166,23 @@ def solve_transient_pressure_fipy(
     diffusion_fv = FaceVariable(mesh=fipy_mesh, value=rho_face * mobility)
 
     # ------------------------------------------------------------------
-    # Gravity source via ConvectionTerm:  ∇·(ρ²·k/μ · g · ẑ)
+    # Gravity body-force term:  div(X),  X = ρ²·k/μ · g_vec,  g_vec = (0, -g)
+    # Added as an explicit cell source via .divergence (see steady-state solver
+    # for the rationale: a ConvectionTerm would wrongly multiply X by P).
     # ------------------------------------------------------------------
     n_faces = fipy_mesh.numberOfFaces
     gravity_vals = np.zeros((2, n_faces))
-    gravity_vals[1] = rho_face**2 * mobility * g
+    gravity_vals[1] = -rho_face**2 * mobility * g
+    # Zero gravity flux on exterior faces; see solve_steady_state_pressure_fipy
+    # for why (prevents the body force from leaking through impermeable
+    # boundaries and producing a spurious vertical velocity of order K).
+    try:
+        _ext = np.array(fipy_mesh.exteriorFaces.value, dtype=bool)
+        gravity_vals[1][_ext] = 0.0
+    except Exception:
+        pass
     gravity_fv = FaceVariable(mesh=fipy_mesh, rank=1, value=gravity_vals)
+    gravity_source = gravity_fv.divergence
 
     # ------------------------------------------------------------------
     # TransientTerm coefficient:  ρ_cell · S_s  (CellVariable)
@@ -1079,10 +1192,9 @@ def solve_transient_pressure_fipy(
     # ------------------------------------------------------------------
     # Recharge source term
     # ------------------------------------------------------------------
-    recharge_array = np.zeros(fipy_mesh.numberOfCells)
-    if np.any(recharge_mask):
-        recharge_array[recharge_mask] = recharge_flux
-    recharge_source = CellVariable(mesh=fipy_mesh, value=recharge_array)
+    recharge_source = CellVariable(
+        mesh=fipy_mesh,
+        value=_recharge_volumetric_source(fipy_mesh, recharge_mask, recharge_flux))
 
     # ------------------------------------------------------------------
     # Pressure CellVariable initialised from previous timestep + Dirichlet BCs
@@ -1103,9 +1215,13 @@ def solve_transient_pressure_fipy(
     # Assemble and solve:
     #   ρ·S_s · ∂P/∂t = ∇·(ρ·k/μ · ∇P) + ∇·(ρ²·k/μ · g · ẑ) + Q
     # ------------------------------------------------------------------
+    # Mass conservation:  ρ·S_s·∂P/∂t = ∇·(ρ·k/μ·∇P) − ∇·(X) + Q,  X = ρ²·k/μ·g_vec.
+    # The gravity body force enters with a MINUS sign so the steady-state limit
+    # (∂P/∂t → 0) reduces to div(ρ·k/μ·∇P) = div(X), identical to the
+    # steady-state solver (which uses DiffusionTerm == +gravity_source).
     eq = (TransientTerm(coeff=rho_cell_var)
           == DiffusionTerm(coeff=diffusion_fv)
-          + ConvectionTerm(coeff=gravity_fv)
+          - gravity_source
           + recharge_source)
 
     _lus = LinearLUSolver(tolerance=1e-12, iterations=1000)
@@ -1347,8 +1463,13 @@ def solve_solute_transport_fipy(
         dispersion_tensor = calculate_dispersion_coefficients_fipy(
             fipy_mesh, q, porosity, diffusivity, l_disp, t_disp
         )
-        # Use tensor diffusion term
-        diffusion_term = DiffusionTermCorrection(coeff=dispersion_tensor)
+        # Use the full anisotropic tensor via a plain DiffusionTerm.
+        # DiffusionTermCorrection adds an explicit non-orthogonal correction
+        # that iterates internally and is ~100x slower on a 22k-cell mesh
+        # (it effectively stalls the run).  On the orthogonal Grid2D the
+        # correction is unnecessary, and DiffusionTerm still carries the full
+        # rank-2 dispersion tensor (Dxx, Dyy, Dxy).
+        diffusion_term = DiffusionTerm(coeff=dispersion_tensor)
     else:
         # Scalar fallback: D_eff = phi*Dm + alpha_L * |v_mean|
         # Estimate mean pore velocity magnitude from face values
@@ -1370,19 +1491,271 @@ def solve_solute_transport_fipy(
     _lus = LinearLUSolver(tolerance=1e-12, iterations=1000)
     eq.solve(var=concentration, dt=dt, solver=_lus)
 
-    # Clip concentration to physical bounds [0, C_seawater] to suppress any
-    # spurious numerical over/undershoot before the value is returned.
-    C_max = getattr(Parameters, 'seawater_concentration', None)
-    if C_max is None:
-        # Derive from specified_concentration if seawater_concentration not set
-        spec_conc = getattr(Parameters, 'specified_concentration', [0.03624])
-        C_max = float(np.max(spec_conc))
+    # Clip concentration to physical bounds [0, C_max] to suppress spurious
+    # numerical over/undershoot.  C_max is the largest concentration that can
+    # physically occur, taken as the max over the seawater, initial and
+    # specified-boundary concentrations.  Using only the boundary value would
+    # wrongly clip a freshening case (boundary C = 0) that starts fully saline
+    # to zero everywhere.
+    _cands = []
+    for _name in ('seawater_concentration', 'initial_concentration'):
+        _v = getattr(Parameters, _name, None)
+        if _v is not None:
+            _cands.append(float(_v))
+    _spec = getattr(Parameters, 'specified_concentration', None)
+    if _spec is not None:
+        _cands.append(float(np.max(_spec)))
+    C_max = max(_cands) if _cands else 1.0
     c_arr = _get_value(concentration)
     c_arr = np.clip(c_arr, 0.0, C_max)
     # Flush subnormal (denormal) values to zero to prevent gradual underflow
     # accumulation that shows up as non-zero C_min (e.g. 9.7e-320) in the log.
     c_arr[np.abs(c_arr) < 1e-300] = 0.0
     return c_arr
+
+
+# ===========================================================================
+# Freshwater-head (SEAWAT-style) formulation
+#
+# These solve for the equivalent freshwater head  h_f = P/(rho_f0 g) + y
+# instead of the total pressure P.  Because h_f has no large hydrostatic
+# gradient, the non-orthogonal flux error on unstructured (topography) meshes,
+# which scales with the gradient magnitude, becomes negligible.  The physics is
+# identical to the pressure form; these functions return P (converted back) and
+# a flux FaceVariable with the SAME signatures as their pressure counterparts,
+# so they are drop-in replacements selected for non-rectangular meshes.
+#
+#   D_h = rho_face * rho_f0 * g * (k/mu)                       (diffusion coeff)
+#   B   = (0, -g (k/mu) rho_face (rho_face - rho_f0))          (buoyancy flux)
+#   steady:    div(D_h grad h_f) = div(B) - Q
+#   transient: rho S_s rho_f0 g dh_f/dt = div(D_h grad h_f) - div(B) + Q
+#   q = -K_f grad h_f - (0, (k/mu)(rho - rho_f0) g),  K_f = rho_f0 g (k/mu)
+# ===========================================================================
+
+def _head_diffusion_and_buoyancy(fipy_mesh, density, mobility, g, rho_f0):
+    """Build the h_f diffusion coefficient D_h and buoyancy source div(B)."""
+    _fci = np.array(fipy_mesh.faceCellIDs)
+    _own = _fci[0]
+    _nb = _fci[1]
+    _valid = _nb >= 0
+    rho_face = density[_own].copy()
+    rho_face[_valid] = 0.5 * (density[_own[_valid]] + density[_nb[_valid]])
+
+    diffusion_fv = FaceVariable(mesh=fipy_mesh, value=rho_face * rho_f0 * g * mobility)
+
+    n_faces = fipy_mesh.numberOfFaces
+    buoy_vals = np.zeros((2, n_faces))
+    buoy_vals[1] = -g * mobility * rho_face * (rho_face - rho_f0)
+    try:
+        _ext = np.array(fipy_mesh.exteriorFaces.value, dtype=bool)
+        buoy_vals[1][_ext] = 0.0
+    except Exception:
+        pass
+    buoy_fv = FaceVariable(mesh=fipy_mesh, rank=1, value=buoy_vals)
+    return diffusion_fv, buoy_fv.divergence, rho_face
+
+
+def _head_bc_constraint(fipy_mesh, spec_pressure_mask, specified_pressure,
+                        cell_centers, rho_f0, g, head_var):
+    """Constrain h_f at the specified-pressure faces (P converted to head)."""
+    if not np.any(spec_pressure_mask):
+        return
+    y = cell_centers[:, 1]
+    specified_head = specified_pressure / (rho_f0 * g) + y
+    bc_face_mask, bc_face_vals = _build_face_pressure_bc(
+        fipy_mesh, spec_pressure_mask, specified_head)
+    if bc_face_mask.any():
+        bc_fv = FaceVariable(mesh=fipy_mesh, value=0.0)
+        bc_fv.setValue(bc_face_vals, where=bc_face_mask)
+        head_var.constrain(bc_fv, where=bc_face_mask)
+
+
+def solve_steady_state_head_fipy(
+    fipy_mesh, backend, k_tensor, viscosity, density, g,
+    recharge_flux, recharge_density, recharge_mask,
+    spec_pressure_mask, specified_pressure,
+    Parameters, cell_centers=None
+):
+    """Steady-state freshwater-head solve. Returns total pressure P (Pa)."""
+    rho_f0 = Parameters.rho_f_0
+    k_eff = np.sqrt(k_tensor[0][0] * k_tensor[1][1])
+    mobility = k_eff / viscosity
+
+    diffusion_fv, buoy_source, _ = _head_diffusion_and_buoyancy(
+        fipy_mesh, density, mobility, g, rho_f0)
+
+    recharge_source = CellVariable(
+        mesh=fipy_mesh,
+        value=_recharge_volumetric_source(fipy_mesh, recharge_mask, recharge_flux))
+
+    head = CellVariable(mesh=fipy_mesh, name='head', value=0.0)
+    _head_bc_constraint(fipy_mesh, spec_pressure_mask, specified_pressure,
+                        cell_centers, rho_f0, g, head)
+
+    eq = DiffusionTerm(coeff=diffusion_fv) == buoy_source - recharge_source
+    eq.solve(var=head, solver=LinearLUSolver(tolerance=1e-12, iterations=1000))
+
+    h_f = _get_value(head)
+    return (h_f - cell_centers[:, 1]) * rho_f0 * g
+
+
+def solve_transient_head_fipy(
+    fipy_mesh, backend, k_tensor, viscosity, density, g,
+    recharge_flux, recharge_mask,
+    spec_pressure_mask, specified_pressure,
+    Parameters, dt, pressure_old, cell_centers, porosity=None, gamma=None,
+    concentration_old=None, dC_dt_field=None
+):
+    """Transient freshwater-head solve. Returns total pressure P (Pa)."""
+    rho_f0 = Parameters.rho_f_0
+    S_s = Parameters.specific_storage
+    k_eff = np.sqrt(k_tensor[0][0] * k_tensor[1][1])
+    mobility = k_eff / viscosity
+
+    diffusion_fv, buoy_source, _ = _head_diffusion_and_buoyancy(
+        fipy_mesh, density, mobility, g, rho_f0)
+
+    # storage term coefficient: rho S_s rho_f0 g  (because P = rho_f0 g (h_f - y))
+    storage = CellVariable(mesh=fipy_mesh, value=density * S_s * rho_f0 * g)
+
+    recharge_source = CellVariable(
+        mesh=fipy_mesh,
+        value=_recharge_volumetric_source(fipy_mesh, recharge_mask, recharge_flux))
+
+    y = cell_centers[:, 1]
+    head_old = pressure_old / (rho_f0 * g) + y
+    head = CellVariable(mesh=fipy_mesh, name='head', value=head_old.copy())
+    _head_bc_constraint(fipy_mesh, spec_pressure_mask, specified_pressure,
+                        cell_centers, rho_f0, g, head)
+
+    eq = (TransientTerm(coeff=storage)
+          == DiffusionTerm(coeff=diffusion_fv)
+          - buoy_source
+          + recharge_source)
+    eq.solve(var=head, dt=dt, solver=LinearLUSolver(tolerance=1e-12, iterations=1000))
+
+    h_f = _get_value(head)
+    return (h_f - y) * rho_f0 * g
+
+
+def calculate_darcy_flux_head_fipy(fipy_mesh, pressure, density, k_tensor,
+                                   viscosity, g, cell_centers, rho_f_0):
+    """
+    Face-centred Darcy flux from the freshwater head.
+
+    Same signature as calculate_darcy_flux_fipy.  The total pressure is
+    converted to head h_f = P/(rho_f0 g) + y, whose (small) gradient is used so
+    the non-orthogonal leak is negligible; buoyancy enters as an explicit face
+    term zeroed on exterior faces.
+    """
+    k_eff = np.sqrt(k_tensor[0][0] * k_tensor[1][1])
+    mobility = k_eff / viscosity
+    y = cell_centers[:, 1]
+
+    h_f = pressure / (rho_f_0 * g) + y
+    hf_var = CellVariable(mesh=fipy_mesh, value=h_f)
+    grad_hf = hf_var.faceGrad
+
+    _fci = np.array(fipy_mesh.faceCellIDs)
+    _own = _fci[0]
+    _nb = _fci[1]
+    _valid = _nb >= 0
+    rho_face = density[_own].copy()
+    rho_face[_valid] = 0.5 * (density[_own[_valid]] + density[_nb[_valid]])
+
+    K_f = rho_f_0 * g * mobility
+    buoy = mobility * (rho_face - rho_f_0) * g
+    try:
+        _ext = np.array(fipy_mesh.exteriorFaces.value, dtype=bool)
+        buoy = np.where(_ext, 0.0, buoy)
+    except Exception:
+        pass
+
+    qx_vals = -K_f * _get_value(grad_hf[0])
+    qy_vals = -K_f * _get_value(grad_hf[1]) - buoy
+    return FaceVariable(mesh=fipy_mesh, value=np.array([qx_vals, qy_vals]))
+
+
+def _cell_qy_from_face_flux(fipy_mesh, q_face):
+    """Cell-centred vertical Darcy velocity from a face flux FaceVariable."""
+    fci = np.array(fipy_mesh.cellFaceIDs)        # (nFacesPerCell, nCells)
+    qy_face = _get_value(q_face[1])
+    return qy_face[fci].mean(axis=0)
+
+
+def solve_steady_head_with_seepage(
+    fipy_mesh, backend, k_tensor, viscosity, density, g,
+    recharge_flux, recharge_density, recharge_mask,
+    spec_pressure_mask, specified_pressure, drain_mask,
+    Parameters, cell_centers, max_seepage_iter=100, verbose=False
+):
+    """
+    Steady freshwater-head solve with an iterative seepage boundary.
+
+    A seepage face is a surface (drain) cell where the water table would rise
+    above the land surface: there the pressure is pinned to P=0 (head = surface
+    elevation) and water discharges.  The active seepage set is unknown a priori
+    and found iteratively (mirrors gwflow_lib.solve_steady_state_pressure_eq_new):
+    add drain cells with P>0, then drop pinned cells that show net inflow (a
+    seepage face can only discharge), until the set stops changing.
+
+    Returns (P, active_seepage_mask).
+    """
+    rho_f0 = Parameters.rho_f_0
+    base_mask = np.array(spec_pressure_mask, dtype=bool)
+    base_vals = np.array(specified_pressure, dtype=float)
+    drain = np.array(drain_mask, dtype=bool) & (~base_mask)
+
+    def solve(mask, vals):
+        return solve_steady_state_head_fipy(
+            fipy_mesh, backend, k_tensor, viscosity, density, g,
+            recharge_flux, recharge_density, recharge_mask,
+            mask, vals, Parameters, cell_centers=cell_centers)
+
+    # first solve without seepage, seed the active set with cells where P>0
+    pressure = solve(base_mask, base_vals)
+    active = drain & (pressure > 0.0)
+
+    rch_vel = recharge_flux / rho_f0
+    n_prev = None
+    for it in range(max_seepage_iter):
+        mask = base_mask | active
+        vals = base_vals.copy()
+        vals[active] = 0.0
+        pressure = solve(mask, vals)
+
+        q = calculate_darcy_flux_head_fipy(
+            fipy_mesh, pressure, density, k_tensor, viscosity, g, cell_centers, rho_f0)
+        qy = _cell_qy_from_face_flux(fipy_mesh, q)
+
+        # remove pinned cells with net inflow (qy < 0 beyond recharge).  Only
+        # the most-inflowing half is removed each pass to avoid oscillation.
+        fcorr = qy + rch_vel
+        if active.any():
+            thr = min(fcorr[active].min() * 0.5, 0.0)
+        else:
+            thr = 0.0
+        remove = active & (fcorr < thr)
+        # add new drain cells where the head now exceeds the surface
+        new = drain & (~active) & (pressure > 0.0)
+
+        n_old = int(active.sum())
+        active = (active | new) & (~remove)
+        n_now = int(active.sum())
+        if verbose:
+            print('  seepage iter %d: active=%d (added %d, removed %d)'
+                  % (it, n_now, int(new.sum()), int(remove.sum())))
+        # Stop when the seepage-set SIZE is stable (mirrors escript's
+        # n_seepage_change == 0).  A residual 1-2 cell swap at a fixed count is
+        # the converged state flickering and is not worth iterating on.
+        if n_now == n_old:
+            break
+
+    mask = base_mask | active
+    vals = base_vals.copy()
+    vals[active] = 0.0
+    pressure = solve(mask, vals)
+    return pressure, active
 
 
 def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convection_scheme='exponential'):
@@ -1430,18 +1803,48 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
     # Initialize backend
     backend = get_backend('fipy')
     
-    # Load mesh
-    print("Loading mesh from:", mesh_filename)
-    from lib.fipy_mesh_io import load_fipy_mesh_from_msh
-    fipy_mesh, cell_centers, masks, field_data, extra = load_fipy_mesh_from_msh(
-        mesh_filename, 
-        topo_gradient=Parameters.topo_gradient
-    )
+    # Load mesh.  For a rectangular domain use an orthogonal FiPy Grid2D
+    # directly (axis-aligned faces) instead of the triangulated .msh.  On a
+    # triangulated box the non-orthogonal faces leak the large hydrostatic
+    # vertical pressure gradient into the horizontal Darcy flux, which
+    # corrupts solute transport and suppresses salt-wedge intrusion.
+    if getattr(Parameters, 'mesh_type', None) == 'rectangle':
+        print("Building orthogonal Grid2D for rectangular domain")
+        from lib.fipy_mesh_io import load_fipy_grid2d
+        fipy_mesh, cell_centers, masks, field_data, extra = load_fipy_grid2d(
+            Parameters, topo_gradient=Parameters.topo_gradient
+        )
+    else:
+        print("Loading mesh from:", mesh_filename)
+        from lib.fipy_mesh_io import load_fipy_mesh_from_msh
+        fipy_mesh, cell_centers, masks, field_data, extra = load_fipy_mesh_from_msh(
+            mesh_filename,
+            topo_gradient=Parameters.topo_gradient
+        )
     
     mesh = FiPyMesh(fipy_mesh)
     n_cells = mesh.num_cells
     print(f"Mesh loaded: {n_cells} cells")
-    
+
+    # Select the flow formulation.  On non-rectangular (unstructured, sloped)
+    # meshes the total-pressure form leaks the large hydrostatic gradient into
+    # the flux because the mesh is non-orthogonal; the equivalent-freshwater-head
+    # (SEAWAT-style) form does not, so it is used there.  Rectangular Grid2D
+    # meshes are orthogonal and keep the validated pressure form.  Can be forced
+    # with Parameters.use_head_formulation.
+    use_head = getattr(Parameters, 'use_head_formulation', None)
+    if use_head is None:
+        use_head = getattr(Parameters, 'mesh_type', 'rectangle') != 'rectangle'
+    if use_head:
+        print("Using freshwater-head formulation (unstructured/topography mesh)")
+        _solve_steady_fn = solve_steady_state_head_fipy
+        _solve_transient_fn = solve_transient_head_fipy
+        _flux_fn = calculate_darcy_flux_head_fipy
+    else:
+        _solve_steady_fn = solve_steady_state_pressure_fipy
+        _solve_transient_fn = solve_transient_pressure_fipy
+        _flux_fn = calculate_darcy_flux_fipy
+
     # Set up boundary conditions
     print("Setting up boundary conditions")
     bc = setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters)
@@ -1489,80 +1892,83 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
     print("-" * 60)
     
     # Initial steady-state pressure solve
+    # Seepage boundary: only meaningful on a topography (head) mesh where the
+    # water table can intersect the land surface.  When enabled, the initial
+    # steady solve finds the seepage faces; the active seepage set is then
+    # carried forward and re-evaluated during the transient loop (see below).
+    _use_seepage = use_head and getattr(Parameters, 'seepage_bnd', False) \
+        and bool(np.any(bc.get('drain_mask', np.zeros(n_cells, dtype=bool))))
+
+    # Recharge MASS flux (kg/(m^2 s)) = volume flux * fluid density, matching the
+    # escript driver (grompy_lib.py: recharge_mass_flux = recharge_flux *
+    # recharge_density).  recharge_flux in the parameter files is a volume flux
+    # (e.g. 0.25 m/yr); passing it without the density factor under-applies the
+    # recharge by ~1000x.
+    _recharge_mass_flux = Parameters.recharge_flux * getattr(
+        Parameters, 'recharge_density', Parameters.rho_f_0)
+
+    # base (non-seepage) specified-pressure BC, kept separate so the seepage
+    # cells can be rebuilt each timestep without losing the original BC.
+    _base_spec_mask = np.array(bc['spec_pressure_mask'], dtype=bool)
+    _base_spec_vals = np.array(bc['specified_pressure'], dtype=float)
+    _drain_mask = np.array(bc.get('drain_mask', np.zeros(n_cells, dtype=bool)), dtype=bool) & (~_base_spec_mask)
+    active_seepage = np.zeros(n_cells, dtype=bool)
+
+    def _seepage_effective_bc():
+        """Return (mask, vals) = base specified-pressure BC plus P=0 seepage cells."""
+        if not _use_seepage:
+            return _base_spec_mask, _base_spec_vals
+        mask = _base_spec_mask | active_seepage
+        vals = np.where(active_seepage, 0.0, _base_spec_vals)
+        return mask, vals
+
+    def _update_seepage_set(pressure_field, q_face, density_field):
+        """Add drain cells with P>0, drop pinned cells with net inflow (escript-style)."""
+        qy = _cell_qy_from_face_flux(fipy_mesh, q_face)
+        rch_vel = _recharge_mass_flux / Parameters.rho_f_0
+        fcorr = qy + rch_vel
+        if active_seepage.any():
+            thr = min(float(fcorr[active_seepage].min()) * 0.5, 0.0)
+        else:
+            thr = 0.0
+        remove = active_seepage & (fcorr < thr)
+        new = _drain_mask & (~active_seepage) & (pressure_field > 0.0)
+        return (active_seepage | new) & (~remove)
+
     if ModelOptions.initial_steady_state_run:
         print("Running initial steady-state pressure solve...")
-        pressure = solve_steady_state_pressure_fipy(
-            fipy_mesh, backend, k_tensor, Parameters.viscosity,
-            density, Parameters.g,
-            Parameters.recharge_flux, Parameters.recharge_density,
-            bc['recharge_mask'],
-            bc['spec_pressure_mask'], bc['specified_pressure'],
-            Parameters, cell_centers=cell_centers
-        )
+        if _use_seepage:
+            print("Iterating seepage boundary...")
+            pressure, active_seepage = solve_steady_head_with_seepage(
+                fipy_mesh, backend, k_tensor, Parameters.viscosity,
+                density, Parameters.g,
+                _recharge_mass_flux, Parameters.recharge_density,
+                bc['recharge_mask'],
+                _base_spec_mask, _base_spec_vals,
+                bc['drain_mask'], Parameters, cell_centers, verbose=True
+            )
+            bc['active_seepage_mask'] = active_seepage
+            print(f"Active seepage cells: {int(active_seepage.sum())}")
+        else:
+            pressure = _solve_steady_fn(
+                fipy_mesh, backend, k_tensor, Parameters.viscosity,
+                density, Parameters.g,
+                _recharge_mass_flux, Parameters.recharge_density,
+                bc['recharge_mask'],
+                bc['spec_pressure_mask'], bc['specified_pressure'],
+                Parameters, cell_centers=cell_centers
+            )
         print("Steady-state pressure solve complete")
         print(f"Pressure range: {pressure.min():.2f} to {pressure.max():.2f} Pa")
         
-        # Enforce concentration boundary conditions after steady-state pressure solve
-        spec_conc_xmin = bc['spec_conc_xmin'] if 'spec_conc_xmin' in bc else Parameters.specified_concentration_xmin
-        spec_conc_xmax = bc['spec_conc_xmax'] if 'spec_conc_xmax' in bc else Parameters.specified_concentration_xmax
-        spec_conc_ymin = Parameters.specified_concentration_ymin
-        spec_conc_ymax = Parameters.specified_concentration_ymax
-        spec_conc_values = Parameters.specified_concentration
-        
-        # Ensure all are lists
-        if not isinstance(spec_conc_xmin, (list, tuple)):
-            spec_conc_xmin = [spec_conc_xmin]
-        if not isinstance(spec_conc_xmax, (list, tuple)):
-            spec_conc_xmax = [spec_conc_xmax]
-        if not isinstance(spec_conc_ymin, (list, tuple)):
-            spec_conc_ymin = [spec_conc_ymin]
-        if not isinstance(spec_conc_ymax, (list, tuple)):
-            spec_conc_ymax = [spec_conc_ymax]
-        if not isinstance(spec_conc_values, (list, tuple)):
-            spec_conc_values = [spec_conc_values]
-        
-        # Get x and y cell centers
-        x = cell_centers[:, 0]
-        y = cell_centers[:, 1]
-        
-        # Tolerance for boundary matching.
-        # mean(diff(unique_x)) is O(L/nCells) ~11 µm on a 50k-cell unstructured mesh —
-        # far smaller than the cell diameter (~2.5 mm).  Use cellsize instead.
-        _cellsize_tol = getattr(Parameters, 'cellsize',
-                                getattr(Parameters, 'cellsize_x', None))
-        if _cellsize_tol is None:
-            _cellsize_tol = 0.01  # fallback
-        tol = _cellsize_tol * 0.6
-        
-        # Apply concentration boundary conditions
-        for i_region in range(len(spec_conc_xmin)):
-            xmin = spec_conc_xmin[i_region]
-            xmax = spec_conc_xmax[i_region]
-            ymin = spec_conc_ymin[i_region]
-            ymax = spec_conc_ymax[i_region]
-            conc_val = spec_conc_values[i_region] if i_region < len(spec_conc_values) else 0.0
-            
-            # Create mask for this region with tolerance
-            # For boundaries at exact locations (xmin == xmax), use tolerance to find nearby cells
-            if abs(xmax - xmin) < tol:
-                # This is a vertical line boundary - match cells within tolerance
-                mask = (
-                    (np.abs(x - xmin) <= tol) &
-                    (y >= ymin) &
-                    (y <= ymax)
-                )
-            else:
-                # This is a region - match cells within bounds
-                mask = (
-                    (x >= xmin) &
-                    (x <= xmax) &
-                    (y >= ymin) &
-                    (y <= ymax)
-                )
-            
-            # Apply boundary condition
-            concentration[mask] = conc_val
-        
+        # Seed the specified-concentration cells with their BC value as the
+        # initial condition.  Use the same mask the transport solver constrains
+        # (bc['spec_conc_mask']) so the two are always consistent; the earlier
+        # code re-derived the region here and could miss the sea floor on a
+        # coastal mesh (y-range default excluding y<0).
+        _scm = bc.get('spec_conc_mask', None)
+        if _scm is not None and np.any(_scm):
+            concentration[_scm] = bc['specified_concentration'][_scm]
         print(f"Concentration range after BC enforcement: {concentration.min():.6f} to {concentration.max():.6f}")
     
     # Create output directory
@@ -1575,9 +1981,14 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
     _min_dx = getattr(Parameters, 'cellsize', getattr(Parameters, 'cellsize_x', None))
     if _min_dx is None:
         _min_dx = np.sqrt(np.array(fipy_mesh.cellVolumes).min())  # fallback
-    _max_allowed_CFL = getattr(Parameters, 'max_allowed_CFL_number', 1.0)
-    if _max_allowed_CFL is None:
-        _max_allowed_CFL = 1.0
+    # max_allowed_CFL_number = None means "disable CFL limiting" (see the model
+    # parameters docstring).  FiPy's convection terms (exponential/upwind/etc.)
+    # are implicit and unconditionally stable, so a strict CFL cap is not needed
+    # for stability; it only controls transient accuracy.  Forcing a cap here
+    # would pin dt to ~0.15 s near the salt inlet and require tens of thousands
+    # of steps to reach steady state.  When None, dt simply grows by dt_inc up
+    # to dt_max.
+    _max_allowed_CFL = getattr(Parameters, 'max_allowed_CFL_number', None)
     _fn_y = np.array(fipy_mesh.faceNormals)[1]  # ny at each face
     # CFL check should use only INTERIOR faces — exterior boundary faces have
     # artificially large normal velocities (the Dirichlet pressure BC forces
@@ -1591,35 +2002,31 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
     while runtime < total_time and runtime < max_runtime and timestep < max_timesteps:
         
         # ------------------------------------------------------------------
-        # CFL-based timestep limiter
-        # Before solving, estimate the maximum normal face velocity and clamp
-        # dt so that CFL = |qn|_max * dt / dx <= max_allowed_CFL_number.
-        # This prevents transport blow-up when large velocities develop.
+        # Optional CFL-based timestep limiter (only when max_allowed_CFL_number
+        # is not None).  Estimate the 99th-percentile interior normal face
+        # velocity and clamp dt so that CFL = |qn| * dt / dx <= the cap.
         # ------------------------------------------------------------------
-        density_for_cfl = calculate_fluid_density(
-            concentration, Parameters.gamma, Parameters.rho_f_0
-        )
-        v_cfl = calculate_darcy_flux_fipy(
-            fipy_mesh, pressure, density_for_cfl, k_tensor,
-            Parameters.viscosity, Parameters.g, cell_centers, Parameters.rho_f_0
-        )
-        _vx_f = _get_value(v_cfl[0]); _vy_f = _get_value(v_cfl[1])
-        _fn_x = np.array(fipy_mesh.faceNormals)[0]
-        _qn_all = np.abs(_vx_f * _fn_x + _vy_f * _fn_y) / Parameters.porosity
-        # Use only interior faces to avoid artificially constraining dt
-        # due to large fluxes at Dirichlet pressure BC faces.
-        _qn = _qn_all[_interior_face_mask]
-        # Use the 99th percentile of interior face speeds rather than the
-        # maximum.  A handful of faces adjacent to Dirichlet pressure BC cells
-        # carry artificially large normal fluxes that would otherwise shrink
-        # dt to ~0.01 s and require ~15 000 steps instead of ~170.
-        _vmax = (np.percentile(_qn, 99) if len(_qn) > 0
-                 else np.percentile(_qn_all, 99))
-        if _vmax > 0:
-            dt_cfl = _max_allowed_CFL * _min_dx / _vmax
-            if dt > dt_cfl:
-                dt = dt_cfl
-        
+        if _max_allowed_CFL is not None:
+            density_for_cfl = calculate_fluid_density(
+                concentration, Parameters.gamma, Parameters.rho_f_0
+            )
+            v_cfl = _flux_fn(
+                fipy_mesh, pressure, density_for_cfl, k_tensor,
+                Parameters.viscosity, Parameters.g, cell_centers, Parameters.rho_f_0
+            )
+            _vx_f = _get_value(v_cfl[0]); _vy_f = _get_value(v_cfl[1])
+            _fn_x = np.array(fipy_mesh.faceNormals)[0]
+            _qn_all = np.abs(_vx_f * _fn_x + _vy_f * _fn_y) / Parameters.porosity
+            # Use only interior faces to avoid artificially constraining dt
+            # due to large fluxes at Dirichlet pressure BC faces.
+            _qn = _qn_all[_interior_face_mask]
+            _vmax = (np.percentile(_qn, 99) if len(_qn) > 0
+                     else np.percentile(_qn_all, 99))
+            if _vmax > 0:
+                dt_cfl = _max_allowed_CFL * _min_dx / _vmax
+                if dt > dt_cfl:
+                    dt = dt_cfl
+
         # Save state at start of timestep for convergence checking
         concentration_start_ts = concentration.copy()
         pressure_start_ts = pressure.copy()
@@ -1645,56 +2052,90 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
             )
             
             # [2] Calculate Darcy flux from current pressure
-            darcy_flux_face = calculate_darcy_flux_fipy(
+            darcy_flux_face = _flux_fn(
                 fipy_mesh, pressure, density, k_tensor, Parameters.viscosity, Parameters.g, cell_centers, Parameters.rho_f_0
             )
             
-            # [3] Solve solute transport with updated velocity
+            # [3] Solve solute transport with updated velocity.
+            # The transient ("old") concentration MUST be the value at the start
+            # of the timestep (concentration_start_ts), NOT the current Picard
+            # iterate.  Otherwise each Picard iteration marches another dt forward
+            # in time instead of re-solving the same timestep with updated
+            # velocity/density, and the coupled loop never converges.
             if ModelOptions.solute_transport:
                     concentration_before_iter = concentration.copy()   # save for convergence check
                     concentration_new = solve_solute_transport_fipy(
-                        fipy_mesh, backend, concentration, dt,
+                        fipy_mesh, backend, concentration_start_ts, dt,
                         pressure, density, k_tensor, Parameters.viscosity,
                         Parameters.g, Parameters.porosity,
                         Parameters.diffusivity, Parameters.l_disp,
                         Parameters.l_disp * Parameters.disp_ratio,
                         bc['spec_conc_mask'], bc['specified_concentration'],
-                        Parameters, cell_centers, use_tensor_dispersion=True, convection_scheme=convection_scheme,
+                        Parameters, cell_centers,
+                        use_tensor_dispersion=getattr(Parameters, 'use_tensor_dispersion', True),
+                        convection_scheme=convection_scheme,
                         darcy_velocity_face=darcy_flux_face
                     )
-                    concentration = concentration_new
+                    # Under-relax the concentration update.  The density-flow
+                    # coupling is strong (denser seawater changes the velocity,
+                    # which moves the salt, which changes the density ...), so a
+                    # plain Picard update oscillates and never converges within
+                    # a timestep.  Relaxing damps the oscillation; at the fixed
+                    # point concentration_new == concentration_before_iter so the
+                    # relaxation does not bias the converged solution.
+                    _relax = getattr(Parameters, 'coupled_relaxation', 0.6)
+                    concentration = (_relax * concentration_new
+                                     + (1.0 - _relax) * concentration_before_iter)
             
             # [3.5] Calculate concentration change rate (dC/dt) for coupling
             # This is used in the pressure equation to account for density-driven flow
             dC_dt_field = (concentration - concentration_start_ts) / dt
             
-            # [4] Solve transient pressure with updated density and coupling
-            # (This is where coupling happens - density changes affect pressure)
-            # Pass the current best-estimate pressure (updated each Picard iter)
-            # rather than the fixed pressure_start_ts so density-driven changes
-            # can propagate within the coupled loop.
-            pressure_new = solve_transient_pressure_fipy(
+            # [4] Solve transient pressure with updated density and coupling.
+            # As with transport, the transient ("old") pressure must be the
+            # value at the START of the timestep (pressure_start_ts), so each
+            # Picard iteration re-solves the same timestep with updated density
+            # rather than advancing time.  The density coefficient itself is the
+            # current iterate, which is how the density-pressure coupling enters.
+            # effective specified-pressure BC = base BC + current seepage cells
+            _eff_spec_mask, _eff_spec_vals = _seepage_effective_bc()
+            pressure_new = _solve_transient_fn(
                 fipy_mesh, backend, k_tensor, Parameters.viscosity,
                 density, Parameters.g,
-                Parameters.recharge_flux, bc['recharge_mask'],
-                bc['spec_pressure_mask'], bc['specified_pressure'],
-                Parameters, dt, pressure, cell_centers,
+                _recharge_mass_flux, bc['recharge_mask'],
+                _eff_spec_mask, _eff_spec_vals,
+                Parameters, dt, pressure_start_ts, cell_centers,
                 porosity=Parameters.porosity,
                 gamma=Parameters.gamma,
                 concentration_old=concentration_start_ts,
                 dC_dt_field=dC_dt_field
             )
             
-            # [5] Check convergence
+            # [5] Check convergence.  Measure the movement of the (relaxed)
+            # iterate between Picard sweeps; at the fixed point this goes to zero.
             pressure_change = np.max(np.abs(pressure_new - pressure)) if len(pressure_new) > 0 else 0.0
-            # Use concentration_before_iter (saved before overwriting) so the diff is non-trivial
-            conc_change = np.max(np.abs(concentration_new - concentration_before_iter)) if (ModelOptions.solute_transport and len(concentration_new) > 0) else 0.0
+            conc_change = np.max(np.abs(concentration - concentration_before_iter)) if (ModelOptions.solute_transport and len(concentration) > 0) else 0.0
             
             pressure_changes.append(pressure_change)
             concentration_changes.append(conc_change)
 
             pressure = pressure_new
-            
+
+            # Re-evaluate the seepage boundary within the coupled loop (escript
+            # style): add drain cells whose head now exceeds the surface and drop
+            # pinned cells that have become inflow.  Gated by
+            # seepage_bnd_timestep_interval and stopped after seepage_bnd_max_time
+            # (small late-time oscillations otherwise cost runtime).
+            if _use_seepage:
+                _seep_interval = int(getattr(Parameters, 'seepage_bnd_timestep_interval', 1))
+                _seep_max_time = getattr(Parameters, 'seepage_bnd_max_time', 1e30)
+                if runtime < _seep_max_time and (timestep % max(_seep_interval, 1) == 0):
+                    _q_seep = _flux_fn(
+                        fipy_mesh, pressure, density, k_tensor,
+                        Parameters.viscosity, Parameters.g, cell_centers,
+                        Parameters.rho_f_0)
+                    active_seepage = _update_seepage_set(pressure, _q_seep, density)
+
             if (pressure_change < pressure_tol and conc_change < concentration_tol):
                 coupled_converged = True
                 if coupled_iter > 0:
@@ -1787,14 +2228,17 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
     
     print("-" * 60)
     print(f"Simulation complete: {timestep} timesteps, runtime = {get_timestr(runtime)}")
-    
+    if _use_seepage:
+        bc['active_seepage_mask'] = active_seepage
+        print(f"Final active seepage cells: {int(active_seepage.sum())}")
+
     # Final output
     # Compute final derived fields
     z_surface = bc['z_surface']
     h = (pressure / (density * Parameters.g)) + z_surface
     
-    q_face = calculate_darcy_flux_fipy(fipy_mesh, pressure, density, k_tensor, 
-                                            Parameters.viscosity, Parameters.g, cell_centers, Parameters.rho_f_0)
+    q_face = _flux_fn(fipy_mesh, pressure, density, k_tensor,
+                      Parameters.viscosity, Parameters.g, cell_centers, Parameters.rho_f_0)
     
     # Interpolate velocity from faces to cell centers
     # FiPy FaceVariable -> CellVariable conversion

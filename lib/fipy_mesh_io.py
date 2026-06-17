@@ -24,6 +24,71 @@ import os
 import numpy as np
 
 
+def load_fipy_grid2d(Parameters, topo_gradient=None, tol=1e-8):
+    """
+    Build an orthogonal FiPy ``Grid2D`` for a rectangular domain.
+
+    For a rectangular benchmark the domain is a simple box, so an axis-aligned
+    ``Grid2D`` (orthogonal faces) is the correct FiPy mesh.  Triangulating the
+    box (as the .msh path does) produces non-orthogonal faces whose
+    cell-centre connectors are not parallel to the face normals; the large
+    hydrostatic vertical pressure gradient then leaks into the horizontal
+    Darcy flux, corrupting the velocity field used for solute transport.  A
+    ``Grid2D`` avoids this entirely.
+
+    Returns the same tuple signature as ``load_fipy_mesh_from_msh`` so it is a
+    drop-in replacement in ``run_coupled_flow_model_fipy``.
+
+    Parameters
+    ----------
+    Parameters : object
+        Model parameters; uses ``L``, ``thickness``, ``cellsize_x``,
+        ``cellsize_y`` (falling back to ``cellsize``).
+    topo_gradient : float or None
+        Surface gradient (0 / None for the flat benchmark box).
+    tol : float
+        Tolerance for the simple coordinate masks.
+
+    Returns
+    -------
+    fipy_mesh, cell_centers, masks, field_data, extra
+    """
+    import fipy
+
+    dx = getattr(Parameters, 'cellsize_x', getattr(Parameters, 'cellsize', None))
+    dy = getattr(Parameters, 'cellsize_y', getattr(Parameters, 'cellsize', None))
+    L = Parameters.L
+    thickness = Parameters.thickness
+
+    nx = int(round(L / dx))
+    ny = int(round(thickness / dy))
+
+    fipy_mesh = fipy.Grid2D(dx=dx, dy=dy, nx=nx, ny=ny)
+    cell_centers = np.array(fipy_mesh.cellCenters).T  # (nCells, 2)
+
+    x_centers = cell_centers[:, 0]
+    y_centers = cell_centers[:, 1]
+
+    if topo_gradient is None or topo_gradient == 0.0:
+        z_surface_cells = np.full_like(x_centers, y_centers.max())
+    else:
+        z_surface_cells = x_centers * topo_gradient
+
+    y_range = y_centers.max() - y_centers.min()
+    surface_tol = max(tol, y_range * 0.01)
+    masks = {
+        'surface': np.abs(y_centers - z_surface_cells) <= surface_tol,
+        'sea_surface': (np.abs(y_centers - 0.0) <= tol) & (x_centers < 0),
+        'seawater': (x_centers < 0) & (y_centers <= z_surface_cells + tol),
+        'physical_groups': {},
+    }
+
+    field_data = {}
+    extra = {'z_surface_cells': z_surface_cells, 'cell_centers': cell_centers}
+
+    return fipy_mesh, cell_centers, masks, field_data, extra
+
+
 def load_fipy_mesh_from_msh(mesh_filename, topo_gradient=None, tol=1e-8):
     """
     Read a Gmsh mesh and return a FiPy mesh and cell-centred masks.

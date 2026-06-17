@@ -334,6 +334,19 @@ class ModelParameters(dict):
     min_iterations = 4
     max_iterations = 20
 
+    # under-relaxation factor for the sequential (Picard) coupling of the
+    # solute transport and fluid flow equations in the FiPy backend.
+    # The density-flow coupling is strongly nonlinear (denser seawater speeds
+    # up the flow, which moves the salt, which changes the density), so a plain
+    # Picard update oscillates.  0.5 damps it enough for the coupling to
+    # actually converge each timestep (0.6 still leaves it hitting the iteration
+    # cap).  Converged coupling is essential for the deep, buoyancy-dominated
+    # wedges (e.g. SS-2): with loose coupling the wedge equilibrates artificially
+    # short.  NOTE: a converged coupling keeps the wedge advancing, so the deeper
+    # scenarios also need a longer total_time than the 80 min default to reach
+    # steady state (SS-2 needs several hours of model time).
+    coupled_relaxation = 0.5
+
     # fluid viscosity
     # note, grompy can also automatically calculate viscosity from concentration and temperature data following
     # Batzle and Wang (1992). This option is controlled by calculate_viscosity in the iterate_coupled_flow_eqs function
