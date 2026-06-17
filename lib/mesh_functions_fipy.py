@@ -863,9 +863,156 @@ def setup_coastal_mesh_glover1959_fipy(Parameters, mesh_filename):
     return mesh, surface_mask, sea_surface, seawater, z_surface
 
 
+def read_topography_csv(csv_filename):
+    """
+    Read a land surface topography profile from a CSV file.
+
+    The file must contain the horizontal distance and the surface elevation in
+    its first two columns (a header row is allowed).  Columns named 'x' and 'z'
+    (or 'distance' and 'elevation') are used when present, otherwise the first
+    two columns are taken.  Points are returned sorted by increasing distance.
+
+    Parameters
+    ----------
+    csv_filename : str
+        Path to the topography CSV file.
+
+    Returns
+    -------
+    x_topo : np.ndarray
+        Horizontal distance of the surface points (m).
+    z_topo : np.ndarray
+        Surface elevation of the surface points (m).
+    """
+    import pandas as pd
+
+    df = pd.read_csv(csv_filename)
+    cols_lower = [str(c).lower() for c in df.columns]
+
+    def pick(names):
+        for name in names:
+            if name in cols_lower:
+                return df.columns[cols_lower.index(name)]
+        return None
+
+    x_col = pick(['x', 'distance', 'dist'])
+    z_col = pick(['z', 'elevation', 'elev', 'topography', 'topo'])
+    if x_col is None or z_col is None:
+        x_col, z_col = df.columns[0], df.columns[1]
+
+    x_topo = df[x_col].to_numpy(dtype=float)
+    z_topo = df[z_col].to_numpy(dtype=float)
+
+    order = np.argsort(x_topo)
+    return x_topo[order], z_topo[order]
+
+
+def setup_irregular_mesh_fipy(Parameters, mesh_filename):
+    """
+    Create an unstructured mesh for a real land surface topography read from CSV.
+
+    The land surface is the polyline through the (x, z) points in the CSV file
+    given by ``Parameters.topo_csv``.  The aquifer base follows the topography
+    at a constant ``Parameters.thickness`` below the surface, giving a domain of
+    constant vertical thickness.  The triangular mesh is generated with the Gmsh
+    Python API and written as a MSH 2.2 file that the FiPy backend can load.
+
+    The land surface points are tagged as the physical group 'land_surface'.
+
+    Parameters
+    ----------
+    Parameters : object
+        Model parameters; uses ``topo_csv`` (path to the CSV), ``thickness`` and
+        ``cellsize``.
+    mesh_filename : str
+        Path to write the generated .msh file.
+
+    Returns
+    -------
+    mesh : fipy mesh
+    surface_mask : np.ndarray (bool)
+        True for cells whose centre lies near the land surface.
+    sea_surface : None
+    seawater : None
+    z_surface : np.ndarray
+        Surface elevation interpolated at each cell centre.
+
+    Notes
+    -----
+    This generates the mesh only.  Solving the variable-density flow on such an
+    unstructured, non-orthogonal mesh additionally requires a non-orthogonal
+    robust pressure/flux formulation in the FiPy backend (the orthogonal Grid2D
+    path used for rectangular domains does not apply here).
+    """
+    _check_fipy_available('setup_irregular_mesh_fipy')
+    _check_gmsh_available('setup_irregular_mesh_fipy')
+
+    csv_filename = getattr(Parameters, 'topo_csv', None)
+    if csv_filename is None:
+        raise ValueError(
+            "setup_irregular_mesh_fipy requires Parameters.topo_csv "
+            "(path to a CSV file with surface distance and elevation)")
+
+    x_topo, z_topo = read_topography_csv(csv_filename)
+    thickness = Parameters.thickness
+    cellsize = Parameters.cellsize
+
+    gmsh.initialize()
+    gmsh.option.setNumber("General.Terminal", 0)
+    gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+    gmsh.model.add("irregular_mesh")
+
+    try:
+        # surface points, left to right
+        top_points = [gmsh.model.geo.addPoint(x, z, 0, cellsize)
+                      for x, z in zip(x_topo, z_topo)]
+        # base points, right to left, at constant thickness below the surface
+        base_points = [gmsh.model.geo.addPoint(x, z - thickness, 0, cellsize)
+                       for x, z in zip(x_topo[::-1], z_topo[::-1])]
+
+        ordered = top_points + base_points
+        lines = []
+        for i in range(len(ordered)):
+            p1 = ordered[i]
+            p2 = ordered[(i + 1) % len(ordered)]
+            lines.append(gmsh.model.geo.addLine(p1, p2))
+
+        curve_loop = gmsh.model.geo.addCurveLoop(lines)
+        surface = gmsh.model.geo.addPlaneSurface([curve_loop])
+
+        gmsh.model.geo.synchronize()
+        gmsh.model.addPhysicalGroup(2, [surface], name="land")
+        # the first len(top_points)-1 lines are the land surface segments
+        surface_line_tags = lines[:len(top_points) - 1]
+        gmsh.model.addPhysicalGroup(1, surface_line_tags, name="land_surface")
+
+        gmsh.model.mesh.generate(2)
+
+        mesh_dir = os.path.dirname(mesh_filename)
+        if mesh_dir and not os.path.exists(mesh_dir):
+            os.makedirs(mesh_dir)
+        gmsh.write(mesh_filename)
+    finally:
+        gmsh.finalize()
+
+    mesh, surface_mask, sea_surface, seawater, z_surface = _load_mesh_from_msh(
+        mesh_filename, topo_gradient=None, tol=cellsize / 2)
+
+    cell_centers = mesh.cellCenters
+    x_centers = np.array(cell_centers[0])
+    y_centers = np.array(cell_centers[1])
+
+    # surface elevation at each cell centre interpolated from the CSV profile
+    z_surface = np.interp(x_centers, x_topo, z_topo)
+    surface_mask = np.abs(y_centers - z_surface) < (cellsize / 2.0)
+
+    return mesh, surface_mask, None, None, z_surface
+
+
 # Aliases to match the original mesh_functions.py interface
 # These allow the module to be used as a drop-in replacement
 setup_rectangular_mesh = setup_rectangular_mesh_fipy
 setup_standard_mesh = setup_standard_mesh_fipy
 setup_coastal_mesh = setup_coastal_mesh_fipy
 setup_coastal_mesh_glover1959 = setup_coastal_mesh_glover1959_fipy
+setup_irregular_mesh = setup_irregular_mesh_fipy
