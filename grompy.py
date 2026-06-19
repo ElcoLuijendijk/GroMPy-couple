@@ -34,6 +34,7 @@ import datetime
 import random
 import importlib.util
 import importlib.machinery
+import multiprocessing
 
 import numpy as np
 import pandas as pd
@@ -166,13 +167,49 @@ def get_backend_name(ModelOptions):
             raise ImportError("Neither escript nor FiPy backends are available!")
 
 
+def save_summary_results(df, model_output_folder, scenario_name, nscenarios,
+                         dfo=None):
+    """Write the combined model input parameters and results to a summary csv.
+
+    Args:
+        df: DataFrame with one row per model scenario.
+        model_output_folder: Directory to write the summary file to.
+        scenario_name: Scenario name used in the output filename.
+        nscenarios: Total number of scenarios, used in the output filename.
+        dfo: Optional existing results to prepend (kept for compatibility).
+
+    Returns:
+        Path to the written summary csv file.
+    """
+    dfm = df
+    if dfo is not None:
+        dfm = pd.concat([dfo, df])
+        dfm = dfm[list(dfo.columns)]
+
+    today = datetime.datetime.now()
+    today_str = '%i-%i-%i' % (today.day, today.month, today.year)
+    filename = os.path.join(model_output_folder,
+                            'final_model_results_%s_%s_%i_runs.csv'
+                            % (scenario_name, today_str, nscenarios))
+
+    if os.path.exists(filename):
+        backup_filename = filename + '_backup'
+        os.rename(filename, backup_filename)
+        print('moved previous input & output data to %s' % backup_filename)
+
+    print('saving model run input & output data to %s' % filename)
+    dfm.to_csv(filename, index_label='model_run')
+
+    return filename
+
+
 def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
                                            mesh_function,
                                            run, model_scenario_name,
                                            scenario_parameters, scenario_param_names,
                                            df, model_output_folder,
                                            scriptdir, scenario_name,
-                                           nscenarios, dfo=None):
+                                           nscenarios, dfo=None, write_summary=True):
 
     year = 365.25 * 24 * 60 * 60
 
@@ -370,9 +407,8 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
                'min_seepage_flux', 'max_seepage_flux',
                'min_submarine_flux', 'max_submarine_flux']
 
-    if run == 0:
-        df = grompy_salt_lib.add_cols_to_df(df, newcols)
-        df['model_scenario_id'] = ''
+    df = grompy_salt_lib.add_cols_to_df(df, newcols)
+    df['model_scenario_id'] = df['model_scenario_id'].fillna('')
 
     # store model results in dataframe
     df.loc[run, 'model_scenario_id'] = run_id
@@ -603,31 +639,84 @@ def run_model_scenario_and_analyze_results(Parameters, ModelOptions,
     print('saving P and C changes to %s' % filename)
     df_diff.to_csv(filename, index_label='timestep')
 
-    # merge new model results dataframe with existing model output, if any
-    dfm = df
-    if dfo is not None:
-        dfm = pd.concat([dfo, df])
-
-        # keep columnn order
-        dfm = dfm[list(dfo.columns)]
-
-    # save model runs input params and results to .csv file
-    today = datetime.datetime.now()
-    today_str = '%i-%i-%i' % (today.day, today.month, today.year)
-    filename = os.path.join(model_output_folder,
-                            'final_model_results_%s_%s_%i_runs.csv'
-                            % (scenario_name, today_str, nscenarios))
-
-    # check if file exists already
-    if os.path.exists(filename):
-        backup_filename = filename + '_backup'
-        os.rename(filename, backup_filename)
-        print('moved previous input & output data to %s' % backup_filename)
-
-    print('saving model run input & output data to %s' % filename)
-    dfm.to_csv(filename, index_label='model_run')
+    # save the combined input params and results to a summary .csv file.
+    # In a parallel sweep each worker holds only its own row, so the write is
+    # skipped here (write_summary=False) and the parent process writes the
+    # concatenated summary once after all workers finish.
+    if write_summary:
+        save_summary_results(df, model_output_folder, scenario_name,
+                             nscenarios, dfo)
 
     return df
+
+
+def load_model_config(inp_file_loc):
+    """Load model configuration classes and the mesh setup function.
+
+    This mirrors the configuration loading inside ``main`` so that worker
+    processes can reconstruct the configuration independently. Reloading
+    inside each worker avoids pickling class and function objects across
+    process boundaries, which is fragile under the spawn start method.
+
+    Args:
+        inp_file_loc: Path to a model parameter file, or None to use the
+            default ``model_input/model_parameters.py``.
+
+    Returns:
+        Tuple of (ModelParameters, ModelOptions, ParameterRanges,
+        mesh_function).
+    """
+    if inp_file_loc is not None:
+        model_parameters = load_module_from_file('model_parameters', inp_file_loc)
+        ModelParameters = model_parameters.ModelParameters
+        ModelOptions = model_parameters.ModelOptions
+        ParameterRanges = model_parameters.ParameterRanges
+    else:
+        from model_input.model_parameters import ModelParameters, ModelOptions
+        from model_input.model_parameters import ParameterRanges
+
+    backend_name = get_backend_name(ModelOptions)
+    mesh_functions = get_mesh_functions(backend_name)
+
+    if ModelParameters.mesh_type == 'coastal':
+        mesh_function = mesh_functions.setup_coastal_mesh_glover1959
+    elif ModelParameters.mesh_type == 'rectangle':
+        mesh_function = mesh_functions.setup_rectangular_mesh
+    else:
+        mesh_function = mesh_functions.setup_standard_mesh
+
+    return ModelParameters, ModelOptions, ParameterRanges, mesh_function
+
+
+def run_scenario_worker(args):
+    """Run a single model scenario in a separate process.
+
+    Reconstructs the model configuration from the parameter file location,
+    runs one scenario, and returns its single result row. Intended to be
+    used as the target of a multiprocessing pool when running multiple
+    scenarios in parallel on a multicore machine.
+
+    Args:
+        args: Tuple packing (inp_file_loc, run, model_scenario_name,
+            scenario_parameters, scenario_param_names, model_output_folder,
+            scriptdir, scenario_name, nscenarios).
+
+    Returns:
+        A single-row pandas DataFrame with the results for this scenario.
+    """
+    (inp_file_loc, run, model_scenario_name, scenario_parameters,
+     scenario_param_names, model_output_folder, scriptdir,
+     scenario_name, nscenarios) = args
+
+    ModelParameters, ModelOptions, _, mesh_function = load_model_config(inp_file_loc)
+    Parameters = ModelParameters()
+
+    result_df = run_model_scenario_and_analyze_results(
+        Parameters, ModelOptions, mesh_function, run, model_scenario_name,
+        scenario_parameters, scenario_param_names, None, model_output_folder,
+        scriptdir, scenario_name, nscenarios, write_summary=False)
+
+    return result_df.loc[[run]]
 
 
 def main():
@@ -684,6 +773,8 @@ def main():
 
         print('running model input data from file ' \
               'model_input/model_parameters.py')
+
+        inp_file_loc = None
 
         from model_input.model_parameters import ModelParameters, ModelOptions
         from model_input.model_parameters import ParameterRanges
@@ -821,28 +912,65 @@ def main():
 
     nscenarios = len(scenario_parameter_combinations)
 
-    # go through all model scenarios
-    for run, scenario_parameters in enumerate(scenario_parameter_combinations):
+    # number of scenarios to run simultaneously on a multicore machine
+    max_proc = getattr(ModelOptions, 'max_proc', 1)
+    run_in_parallel = max_proc is not None and max_proc > 1 and nscenarios > 1
 
+    # do not mix Python multiprocessing with an MPI parallel solve
+    try:
+        from fipy import parallel as _fipy_parallel
+        if _fipy_parallel.Nproc > 1 and run_in_parallel:
+            print('Note: running under MPI; disabling multiprocessing scenario '
+                  'parallelism to avoid oversubscription')
+            run_in_parallel = False
+    except (ImportError, AttributeError):
+        pass
 
-        # read default model parameter file
-        Parameters = ModelParameters()
-        model_scenario_name = model_scenario_names[run]
+    if run_in_parallel:
 
-        df = run_model_scenario_and_analyze_results(Parameters,
-                                                    ModelOptions,
-                                                    mesh_function, run, model_scenario_name,
-                                                    scenario_parameters, scenario_param_names,
-                                                    df, model_output_folder,
-                                                    scriptdir, scenario_name, nscenarios)
-        #(Parameters, ModelOptions,
-        #                                   mesh_function,
-        #                                   run, model_scenario_name,
-        #                                   scenario_parameters, scenario_param_names,
-        #                                   df, model_output_folder,
-        #                                   scriptdir, scenario_name,
-        #                                   nscenarios
-        #
+        # limit the number of BLAS threads per worker so that N worker
+        # processes do not each spawn N compute threads. spawned workers
+        # inherit these environment variables.
+        for _thread_var in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
+                            'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS',
+                            'VECLIB_MAXIMUM_THREADS'):
+            os.environ.setdefault(_thread_var, '1')
+
+        n_workers = min(max_proc, nscenarios, multiprocessing.cpu_count())
+        print('number of cores available: %i' % multiprocessing.cpu_count())
+        print('running %i scenarios in parallel using %i worker processes'
+              % (nscenarios, n_workers))
+
+        task_args = [
+            (inp_file_loc, run, model_scenario_names[run], scenario_parameters,
+             scenario_param_names, model_output_folder, scriptdir,
+             scenario_name, nscenarios)
+            for run, scenario_parameters in enumerate(scenario_parameter_combinations)
+        ]
+
+        context = multiprocessing.get_context('spawn')
+        with context.Pool(processes=n_workers) as pool:
+            result_rows = pool.map(run_scenario_worker, task_args)
+
+        # workers skipped the summary write; the parent writes it once here
+        df = pd.concat(result_rows).sort_index()
+        save_summary_results(df, model_output_folder, scenario_name, nscenarios)
+
+    else:
+
+        # go through all model scenarios sequentially
+        for run, scenario_parameters in enumerate(scenario_parameter_combinations):
+
+            # read default model parameter file
+            Parameters = ModelParameters()
+            model_scenario_name = model_scenario_names[run]
+
+            df = run_model_scenario_and_analyze_results(Parameters,
+                                                        ModelOptions,
+                                                        mesh_function, run, model_scenario_name,
+                                                        scenario_parameters, scenario_param_names,
+                                                        df, model_output_folder,
+                                                        scriptdir, scenario_name, nscenarios)
 
     #pl.close('all')
 
