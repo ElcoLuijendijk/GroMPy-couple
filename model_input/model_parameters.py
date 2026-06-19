@@ -162,6 +162,14 @@ class ModelParameters(dict):
     thickness = 100.0  # (m)
     # grid cell size
     cellsize = 10.0  # (m)
+
+    # smoothing length (m) for the reported surface boundary flux. The
+    # cell-centred Darcy flux is noisy per cell on unstructured meshes, so a
+    # regularized L2 (Helmholtz) smoothing is applied to a copy used only for
+    # the boundary flux output. Set to None to use the default 2 * cellsize,
+    # to 0.0 to disable smoothing, or to a length in metres to tune it.
+    boundary_flux_smoothing_length = None
+
     # x and y cell size, only used when mesh type = 'rectangle'
     cellsize_x = 5.0  # (m)
     cellsize_y = 5.0  # (m)

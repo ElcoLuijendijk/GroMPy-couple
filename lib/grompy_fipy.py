@@ -33,7 +33,7 @@ from lib.backend.fipy_backend import FiPyBackend, FiPyField, FiPyMesh, FiPyPDESo
 
 try:
     import fipy
-    from fipy import CellVariable, FaceVariable, DiffusionTerm, DiffusionTermCorrection, ConvectionTerm, TransientTerm
+    from fipy import CellVariable, FaceVariable, DiffusionTerm, DiffusionTermCorrection, ConvectionTerm, TransientTerm, ImplicitSourceTerm
     from fipy import (
         UpwindConvectionTerm,
         PowerLawConvectionTerm,
@@ -251,6 +251,39 @@ def _diagonal_face_tensor(fipy_mesh, coeff_x, coeff_y):
         value=[[coeff_x, zeros], [zeros, coeff_y]])
 
 
+def _smooth_flux_l2(fipy_mesh, values, smoothing_length):
+    """Regularized (Helmholtz) L2 smoothing of a cell-centred field.
+
+    Solves ``u - L^2 * grad^2 u = values``, the finite-volume analogue of the
+    finite-element L2 flux projection (e.g. escript's projection). A continuous
+    finite-element basis smooths through its off-diagonal mass matrix; the
+    cell-centred finite-volume mass matrix is diagonal and would not smooth, so
+    the neighbour coupling is reintroduced explicitly by the diffusion term.
+
+    With the natural zero-gradient boundary condition the integral is preserved
+    (integral of u equals integral of values), so the smoothing is
+    conservative. The smoothing length L sets the smoothing scale; L = 0 (or
+    None) returns the field unchanged.
+
+    Args:
+        fipy_mesh: The FiPy mesh.
+        values: Cell-centred field to smooth (array, n_cells).
+        smoothing_length: Smoothing length L (m); 0 or None disables smoothing.
+
+    Returns:
+        Smoothed cell-centred field (array, n_cells).
+    """
+    values = np.asarray(values)
+    if smoothing_length is None or smoothing_length <= 0.0:
+        return values
+    u = CellVariable(mesh=fipy_mesh, value=values)
+    src = CellVariable(mesh=fipy_mesh, value=values)
+    eq = (ImplicitSourceTerm(coeff=1.0)
+          == DiffusionTerm(coeff=smoothing_length**2) + src)
+    eq.solve(var=u, solver=LinearLUSolver(tolerance=1e-12, iterations=1000))
+    return np.asarray(u.value)
+
+
 def calculate_darcy_flux_fipy(fipy_mesh, pressure, density, k_tensor, viscosity, g, cell_centers, rho_f_0):
     """
     Calculate face-centred Darcy velocity:
@@ -407,27 +440,80 @@ def calculate_dispersion_coefficients_fipy(fipy_mesh, darcy_flux_face, porosity,
 
 
 
-def calculate_boundary_fluxes_fipy(cell_centers, pressure, density, k_tensor, 
-                                   viscosity, g, bc_dict, Parameters, year):
-    """Calculate boundary fluxes matching escript implementation."""
-    x = cell_centers[:, 0]
-    y = cell_centers[:, 1]
-    
-    kyy = k_tensor[1][1]
+def calculate_boundary_fluxes_fipy(cell_centers, pressure, density, q, k_tensor,
+                                   viscosity, g, bc_dict, Parameters, year,
+                                   fipy_mesh=None, q_face=None):
+    """Boundary fluxes from the Darcy flux through the model surface.
 
-    surface_mask = bc_dict['surface']
-    sea_surface_mask = bc_dict['sea_surface']
-    land_surface_mask = bc_dict['land_surface']
-    
+    The surface-normal flux is the cell-centred Darcy flux q projected onto the
+    cell's outward surface normal, evaluated only at genuine surface cells
+    (those that own an upward-facing exterior face). Using the cell-centred q
+    (the same field that draws the streamlines) keeps the boundary flux
+    consistent with the interior flow: downward inflow is recharge (negative),
+    upward outflow is discharge / seepage (positive).
+
+    The face-centred flux reconstructed by the freshwater-head solver is NOT
+    used here: at exterior faces it is unreliable (faceGrad extrapolation plus
+    the buoyancy term zeroed on the boundary), which produced a spurious
+    discharge-everywhere profile and a boundary mass imbalance. Earlier versions
+    also assigned a constant (kyy/mu) rho g that ignored the solution, or used
+    the cell-centred vertical velocity over ALL surface-tolerance cells
+    (including interior cells with no exterior face).
+
+    q is the cell-centred Darcy flux (2, n_cells). q_face is accepted for
+    backward compatibility but no longer used. Falls back to the cell-centred
+    vertical flux when the mesh is not provided.
+    """
+    x = cell_centers[:, 0]
+
+    surface_mask = np.asarray(bc_dict['surface'], dtype=bool)
+    sea_surface_mask = np.asarray(bc_dict['sea_surface'], dtype=bool)
+    land_surface_mask = np.asarray(bc_dict['land_surface'], dtype=bool)
+
     n_cells = len(x)
+    q_cell = np.array([np.asarray(q[0]), np.asarray(q[1])])
     qx = np.zeros(n_cells)
     qy = np.zeros(n_cells)
-    
-    for i in range(n_cells):
-        if surface_mask[i]:
-            rho_local = density[i]
-            qy[i] = -(kyy / viscosity) * (0.0 - rho_local * g)
-    
+
+    if fipy_mesh is not None:
+        # per-cell outward surface normal, averaged over the cell's upward
+        # exterior faces; cells with no such face are not surface-flux cells.
+        face_normals = np.array(fipy_mesh.faceNormals)
+        ext_faces = np.array(fipy_mesh.exteriorFaces.value, dtype=bool)
+        owners = np.array(fipy_mesh.faceCellIDs)[0]
+        top_faces = ext_faces & (face_normals[1] > 0.0)
+        nx = np.zeros(n_cells)
+        ny = np.zeros(n_cells)
+        cnt = np.zeros(n_cells)
+        np.add.at(nx, owners[top_faces], face_normals[0][top_faces])
+        np.add.at(ny, owners[top_faces], face_normals[1][top_faces])
+        np.add.at(cnt, owners[top_faces], 1.0)
+        bnd = cnt > 0
+        norm = np.sqrt(nx**2 + ny**2)
+        norm[norm == 0.0] = 1.0
+        nx /= norm
+        ny /= norm
+        # Optional Helmholtz (L2) smoothing of a COPY of the cell-centred flux
+        # before projection, to remove the per-cell scatter of the reconstructed
+        # flux on unstructured meshes. The main q field (streamlines, q_abs) is
+        # left untouched. Length defaults to 2*cellsize; 0 disables it.
+        smoothing_length = getattr(
+            Parameters, 'boundary_flux_smoothing_length', None)
+        if smoothing_length is None:
+            smoothing_length = 2.0 * getattr(Parameters, 'cellsize', 0.0)
+        q0 = _smooth_flux_l2(fipy_mesh, q_cell[0], smoothing_length)
+        q1 = _smooth_flux_l2(fipy_mesh, q_cell[1], smoothing_length)
+        # cell-centred Darcy flux projected onto the outward surface normal
+        qn = q0 * nx + q1 * ny
+        qx = np.where(bnd, q0, 0.0)
+        qy = np.where(bnd, qn, 0.0)
+        surface_mask = surface_mask & bnd
+        sea_surface_mask = sea_surface_mask & bnd
+        land_surface_mask = land_surface_mask & bnd
+    else:
+        qx = np.where(surface_mask, q_cell[0], 0.0)
+        qy = np.where(surface_mask, q_cell[1], 0.0)
+
     flux_surface_norm = np.array([qx, qy])
     
     submarine_mask = sea_surface_mask & (x < 0)
@@ -558,7 +644,31 @@ def setup_fipy_boundary_conditions(mesh, cell_centers, masks, Parameters):
     
     # Surface mask: cells at the top boundary
     surface_mask = np.abs(y - z_surface) < tol
-    
+
+    # Refine the surface mask to cells that actually own an upward-facing
+    # exterior face. The |y - z_surface| tolerance alone catches a second,
+    # interior row of cells on unstructured meshes; those carry no boundary
+    # face, so assigning recharge, seepage or a boundary flux to them is wrong
+    # (it produced interior cells with no flux interleaved with the real
+    # surface cells, and unconstrained seepage cells). Intersecting with the
+    # genuine top-boundary cells is a strict subset, so it only removes the
+    # spurious interior cells. Falls back to the tolerance mask when the mesh
+    # faces are unavailable.
+    _fipy_mesh = getattr(mesh, 'fipy_mesh', None) if mesh is not None else None
+    if _fipy_mesh is None and hasattr(mesh, 'faceNormals'):
+        _fipy_mesh = mesh
+    if _fipy_mesh is not None:
+        try:
+            _fn = np.array(_fipy_mesh.faceNormals)
+            _ext = np.array(_fipy_mesh.exteriorFaces.value, dtype=bool)
+            _owners = np.array(_fipy_mesh.faceCellIDs)[0]
+            _top_faces = _ext & (_fn[1] > 0.0)
+            _owns_top = np.zeros(n_cells, dtype=bool)
+            _owns_top[_owners[_top_faces]] = True
+            surface_mask = surface_mask & _owns_top
+        except Exception:
+            pass
+
     # Sea surface mask: surface cells where x < 0
     sea_surface_mask = surface_mask & (x < 0)
     
@@ -1065,7 +1175,11 @@ def solve_steady_state_pressure_fipy(
     # ------------------------------------------------------------------
     recharge_source = CellVariable(
         mesh=fipy_mesh,
-        value=_recharge_volumetric_source(fipy_mesh, recharge_mask, recharge_flux))
+        value=_recharge_volumetric_source(
+            fipy_mesh,
+            np.asarray(recharge_mask, dtype=bool)
+            & ~np.asarray(spec_pressure_mask, dtype=bool),
+            recharge_flux))
 
     # ------------------------------------------------------------------
     # Pressure CellVariable + Dirichlet BCs via .constrain()
@@ -1216,7 +1330,11 @@ def solve_transient_pressure_fipy(
     # ------------------------------------------------------------------
     recharge_source = CellVariable(
         mesh=fipy_mesh,
-        value=_recharge_volumetric_source(fipy_mesh, recharge_mask, recharge_flux))
+        value=_recharge_volumetric_source(
+            fipy_mesh,
+            np.asarray(recharge_mask, dtype=bool)
+            & ~np.asarray(spec_pressure_mask, dtype=bool),
+            recharge_flux))
 
     # ------------------------------------------------------------------
     # Pressure CellVariable initialised from previous timestep + Dirichlet BCs
@@ -1617,7 +1735,11 @@ def solve_steady_state_head_fipy(
 
     recharge_source = CellVariable(
         mesh=fipy_mesh,
-        value=_recharge_volumetric_source(fipy_mesh, recharge_mask, recharge_flux))
+        value=_recharge_volumetric_source(
+            fipy_mesh,
+            np.asarray(recharge_mask, dtype=bool)
+            & ~np.asarray(spec_pressure_mask, dtype=bool),
+            recharge_flux))
 
     head = CellVariable(mesh=fipy_mesh, name='head', value=0.0)
     _head_bc_constraint(fipy_mesh, spec_pressure_mask, specified_pressure,
@@ -1651,7 +1773,11 @@ def solve_transient_head_fipy(
 
     recharge_source = CellVariable(
         mesh=fipy_mesh,
-        value=_recharge_volumetric_source(fipy_mesh, recharge_mask, recharge_flux))
+        value=_recharge_volumetric_source(
+            fipy_mesh,
+            np.asarray(recharge_mask, dtype=bool)
+            & ~np.asarray(spec_pressure_mask, dtype=bool),
+            recharge_flux))
 
     y = cell_centers[:, 1]
     head_old = pressure_old / (rho_f0 * g) + y
@@ -2304,8 +2430,9 @@ def run_coupled_flow_model_fipy(Parameters, ModelOptions, mesh_filename, convect
     concentration_differences_mean = np.array(concentration_differences_mean)
     
     boundary_fluxes, boundary_flux_stats = calculate_boundary_fluxes_fipy(
-        cell_centers, pressure, density, k_tensor, 
-        Parameters.viscosity, Parameters.g, bc, Parameters, year
+        cell_centers, pressure, density, q, k_tensor,
+        Parameters.viscosity, Parameters.g, bc, Parameters, year,
+        fipy_mesh=fipy_mesh, q_face=q_face
     )
     
     boundary_conditions = [
