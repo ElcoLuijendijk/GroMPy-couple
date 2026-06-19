@@ -228,7 +228,29 @@ def fresh_water_head_to_pressure(h_f, rho_f_0, g, y_coords):
     P = (h_f - y_coords) * rho_f_0 * g
     return P
 
- 
+
+def _diagonal_face_tensor(fipy_mesh, coeff_x, coeff_y):
+    """Build a rank-2 diagonal face coefficient for an anisotropic DiffusionTerm.
+
+    Produces the face-centred tensor diag(coeff_x, coeff_y) so that
+    ``DiffusionTerm`` discretises div(diag(coeff_x, coeff_y) . grad(phi)),
+    giving direction-dependent (anisotropic) flow. When coeff_x equals
+    coeff_y this reduces to the isotropic scalar case.
+
+    Args:
+        fipy_mesh: The FiPy mesh.
+        coeff_x: Face-centred coefficient for the x direction (array, n_faces).
+        coeff_y: Face-centred coefficient for the y direction (array, n_faces).
+
+    Returns:
+        Rank-2 FaceVariable holding the diagonal tensor coefficient.
+    """
+    zeros = np.zeros_like(coeff_x)
+    return FaceVariable(
+        mesh=fipy_mesh, rank=2,
+        value=[[coeff_x, zeros], [zeros, coeff_y]])
+
+
 def calculate_darcy_flux_fipy(fipy_mesh, pressure, density, k_tensor, viscosity, g, cell_centers, rho_f_0):
     """
     Calculate face-centred Darcy velocity:
@@ -264,8 +286,8 @@ def calculate_darcy_flux_fipy(fipy_mesh, pressure, density, k_tensor, viscosity,
     """
     kxx = k_tensor[0][0]
     kyy = k_tensor[1][1]
-    k_eff = np.sqrt(kxx * kyy)
-    mobility = k_eff / viscosity
+    mob_x = kxx / viscosity
+    mob_y = kyy / viscosity
 
     # Compute ∇P at faces via FiPy's built-in face-gradient interpolation.
     P_var = CellVariable(mesh=fipy_mesh, value=pressure)
@@ -298,8 +320,8 @@ def calculate_darcy_flux_fipy(fipy_mesh, pressure, density, k_tensor, viscosity,
         grav_term = np.where(_ext, 0.0, grav_term)
     except Exception:
         pass
-    qx_vals = -mobility * _get_value(grad_P_face[0])
-    qy_vals = -mobility * (_get_value(grad_P_face[1]) + grav_term)
+    qx_vals = -mob_x * _get_value(grad_P_face[0])
+    qy_vals = -mob_y * (_get_value(grad_P_face[1]) + grav_term)
 
     return FaceVariable(mesh=fipy_mesh, value=np.array([qx_vals, qy_vals]))
 
@@ -391,10 +413,8 @@ def calculate_boundary_fluxes_fipy(cell_centers, pressure, density, k_tensor,
     x = cell_centers[:, 0]
     y = cell_centers[:, 1]
     
-    kxx = k_tensor[0][0]
     kyy = k_tensor[1][1]
-    k_eff = np.sqrt(kxx * kyy)
-    
+
     surface_mask = bc_dict['surface']
     sea_surface_mask = bc_dict['sea_surface']
     land_surface_mask = bc_dict['land_surface']
@@ -406,7 +426,7 @@ def calculate_boundary_fluxes_fipy(cell_centers, pressure, density, k_tensor,
     for i in range(n_cells):
         if surface_mask[i]:
             rho_local = density[i]
-            qy[i] = -(k_eff / viscosity) * (0.0 - rho_local * g)
+            qy[i] = -(kyy / viscosity) * (0.0 - rho_local * g)
     
     flux_surface_norm = np.array([qx, qy])
     
@@ -992,8 +1012,8 @@ def solve_steady_state_pressure_fipy(
     # ------------------------------------------------------------------
     kxx = k_tensor[0][0]
     kyy = k_tensor[1][1]
-    k_eff = np.sqrt(kxx * kyy)
-    mobility = k_eff / viscosity          # scalar k/μ
+    mob_x = kxx / viscosity
+    mob_y = kyy / viscosity
 
     # ------------------------------------------------------------------
     # Face-interpolate density  ρ_face  (arithmetic average, numpy)
@@ -1009,7 +1029,8 @@ def solve_steady_state_pressure_fipy(
     # ------------------------------------------------------------------
     # DiffusionTerm coefficient:  ρ_face · k/μ  (FaceVariable)
     # ------------------------------------------------------------------
-    diffusion_fv = FaceVariable(mesh=fipy_mesh, value=rho_face * mobility)
+    diffusion_fv = _diagonal_face_tensor(
+        fipy_mesh, rho_face * mob_x, rho_face * mob_y)
 
     # ------------------------------------------------------------------
     # Gravity body-force term:  div(X),  X = ρ²·k/μ · g_vec,  g_vec = (0, -g)
@@ -1021,7 +1042,7 @@ def solve_steady_state_pressure_fipy(
     # ------------------------------------------------------------------
     n_faces = fipy_mesh.numberOfFaces
     gravity_vals = np.zeros((2, n_faces))
-    gravity_vals[1] = -rho_face**2 * mobility * g
+    gravity_vals[1] = -rho_face**2 * mob_y * g
     # Zero the gravity flux on exterior faces.  The body force is added as a
     # cell source (div(X)); if X is left non-zero on the impermeable
     # top/bottom boundary faces, that gravity flux leaks through them because
@@ -1146,8 +1167,8 @@ def solve_transient_pressure_fipy(
     # ------------------------------------------------------------------
     kxx = k_tensor[0][0]
     kyy = k_tensor[1][1]
-    k_eff = np.sqrt(kxx * kyy)
-    mobility = k_eff / viscosity          # scalar k/μ
+    mob_x = kxx / viscosity
+    mob_y = kyy / viscosity
     S_s = Parameters.specific_storage
 
     # ------------------------------------------------------------------
@@ -1163,7 +1184,8 @@ def solve_transient_pressure_fipy(
     # ------------------------------------------------------------------
     # DiffusionTerm coefficient:  ρ_face · k/μ  (FaceVariable)
     # ------------------------------------------------------------------
-    diffusion_fv = FaceVariable(mesh=fipy_mesh, value=rho_face * mobility)
+    diffusion_fv = _diagonal_face_tensor(
+        fipy_mesh, rho_face * mob_x, rho_face * mob_y)
 
     # ------------------------------------------------------------------
     # Gravity body-force term:  div(X),  X = ρ²·k/μ · g_vec,  g_vec = (0, -g)
@@ -1172,7 +1194,7 @@ def solve_transient_pressure_fipy(
     # ------------------------------------------------------------------
     n_faces = fipy_mesh.numberOfFaces
     gravity_vals = np.zeros((2, n_faces))
-    gravity_vals[1] = -rho_face**2 * mobility * g
+    gravity_vals[1] = -rho_face**2 * mob_y * g
     # Zero gravity flux on exterior faces; see solve_steady_state_pressure_fipy
     # for why (prevents the body force from leaking through impermeable
     # boundaries and producing a spurious vertical velocity of order K).
@@ -1377,9 +1399,9 @@ def solve_solute_transport_fipy(
                 h_f_cc = pressure / (Parameters.rho_f_0 * g) + y_cc
                 # Finite-difference gradient using cell-centre neighbours
                 # (rough estimate; only the sign matters here)
-                keff = np.sqrt(k_tensor[0][0] * k_tensor[1][1])
+                kxx = k_tensor[0][0]
                 dh_dx = np.gradient(h_f_cc.reshape(-1))  # 1-D approx
-                qx_cell = -density * (keff / viscosity) * dh_dx
+                qx_cell = -density * (kxx / viscosity) * dh_dx
                 qy_cell = np.zeros_like(qx_cell)
             except Exception:
                 qx_cell = np.zeros(len(active_conc_mask))
@@ -1532,8 +1554,14 @@ def solve_solute_transport_fipy(
 #   q = -K_f grad h_f - (0, (k/mu)(rho - rho_f0) g),  K_f = rho_f0 g (k/mu)
 # ===========================================================================
 
-def _head_diffusion_and_buoyancy(fipy_mesh, density, mobility, g, rho_f0):
-    """Build the h_f diffusion coefficient D_h and buoyancy source div(B)."""
+def _head_diffusion_and_buoyancy(fipy_mesh, density, mob_x, mob_y, g, rho_f0):
+    """Build the h_f diffusion coefficient D_h and buoyancy source div(B).
+
+    mob_x and mob_y are the directional mobilities k_xx/mu and k_yy/mu, so
+    the diffusion coefficient is the anisotropic tensor
+    diag(rho_f0 g rho_face mob_x, rho_f0 g rho_face mob_y) and the buoyancy
+    flux (vertical) uses mob_y.
+    """
     _fci = np.array(fipy_mesh.faceCellIDs)
     _own = _fci[0]
     _nb = _fci[1]
@@ -1541,11 +1569,14 @@ def _head_diffusion_and_buoyancy(fipy_mesh, density, mobility, g, rho_f0):
     rho_face = density[_own].copy()
     rho_face[_valid] = 0.5 * (density[_own[_valid]] + density[_nb[_valid]])
 
-    diffusion_fv = FaceVariable(mesh=fipy_mesh, value=rho_face * rho_f0 * g * mobility)
+    diffusion_fv = _diagonal_face_tensor(
+        fipy_mesh,
+        rho_face * rho_f0 * g * mob_x,
+        rho_face * rho_f0 * g * mob_y)
 
     n_faces = fipy_mesh.numberOfFaces
     buoy_vals = np.zeros((2, n_faces))
-    buoy_vals[1] = -g * mobility * rho_face * (rho_face - rho_f0)
+    buoy_vals[1] = -g * mob_y * rho_face * (rho_face - rho_f0)
     try:
         _ext = np.array(fipy_mesh.exteriorFaces.value, dtype=bool)
         buoy_vals[1][_ext] = 0.0
@@ -1578,11 +1609,11 @@ def solve_steady_state_head_fipy(
 ):
     """Steady-state freshwater-head solve. Returns total pressure P (Pa)."""
     rho_f0 = Parameters.rho_f_0
-    k_eff = np.sqrt(k_tensor[0][0] * k_tensor[1][1])
-    mobility = k_eff / viscosity
+    mob_x = k_tensor[0][0] / viscosity
+    mob_y = k_tensor[1][1] / viscosity
 
     diffusion_fv, buoy_source, _ = _head_diffusion_and_buoyancy(
-        fipy_mesh, density, mobility, g, rho_f0)
+        fipy_mesh, density, mob_x, mob_y, g, rho_f0)
 
     recharge_source = CellVariable(
         mesh=fipy_mesh,
@@ -1609,11 +1640,11 @@ def solve_transient_head_fipy(
     """Transient freshwater-head solve. Returns total pressure P (Pa)."""
     rho_f0 = Parameters.rho_f_0
     S_s = Parameters.specific_storage
-    k_eff = np.sqrt(k_tensor[0][0] * k_tensor[1][1])
-    mobility = k_eff / viscosity
+    mob_x = k_tensor[0][0] / viscosity
+    mob_y = k_tensor[1][1] / viscosity
 
     diffusion_fv, buoy_source, _ = _head_diffusion_and_buoyancy(
-        fipy_mesh, density, mobility, g, rho_f0)
+        fipy_mesh, density, mob_x, mob_y, g, rho_f0)
 
     # storage term coefficient: rho S_s rho_f0 g  (because P = rho_f0 g (h_f - y))
     storage = CellVariable(mesh=fipy_mesh, value=density * S_s * rho_f0 * g)
@@ -1648,8 +1679,8 @@ def calculate_darcy_flux_head_fipy(fipy_mesh, pressure, density, k_tensor,
     the non-orthogonal leak is negligible; buoyancy enters as an explicit face
     term zeroed on exterior faces.
     """
-    k_eff = np.sqrt(k_tensor[0][0] * k_tensor[1][1])
-    mobility = k_eff / viscosity
+    mob_x = k_tensor[0][0] / viscosity
+    mob_y = k_tensor[1][1] / viscosity
     y = cell_centers[:, 1]
 
     h_f = pressure / (rho_f_0 * g) + y
@@ -1663,16 +1694,17 @@ def calculate_darcy_flux_head_fipy(fipy_mesh, pressure, density, k_tensor,
     rho_face = density[_own].copy()
     rho_face[_valid] = 0.5 * (density[_own[_valid]] + density[_nb[_valid]])
 
-    K_f = rho_f_0 * g * mobility
-    buoy = mobility * (rho_face - rho_f_0) * g
+    K_fx = rho_f_0 * g * mob_x
+    K_fy = rho_f_0 * g * mob_y
+    buoy = mob_y * (rho_face - rho_f_0) * g
     try:
         _ext = np.array(fipy_mesh.exteriorFaces.value, dtype=bool)
         buoy = np.where(_ext, 0.0, buoy)
     except Exception:
         pass
 
-    qx_vals = -K_f * _get_value(grad_hf[0])
-    qy_vals = -K_f * _get_value(grad_hf[1]) - buoy
+    qx_vals = -K_fx * _get_value(grad_hf[0])
+    qy_vals = -K_fy * _get_value(grad_hf[1]) - buoy
     return FaceVariable(mesh=fipy_mesh, value=np.array([qx_vals, qy_vals]))
 
 
